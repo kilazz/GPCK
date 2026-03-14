@@ -1,0 +1,42 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0-windows</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<PlatformTarget>x64</PlatformTarget>
+		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\GPCK.Core\GPCK.Core.csproj" />
+		<PackageReference Include="Spectre.Console" Version="0.54.0" />
+		<PackageReference Include="TerraFX.Interop.Windows" Version="10.0.26100.6" />
+		<PackageReference Include="Microsoft.Direct3D.DirectStorage" Version="1.3.0">
+			<GeneratePathProperty>true</GeneratePathProperty>
+		</PackageReference>
+		<PackageReference Include="Microsoft.Direct3D.D3D12" Version="1.618.5">
+			<GeneratePathProperty>true</GeneratePathProperty>
+		</PackageReference>
+		<PackageReference Include="Microsoft.Direct3D.DXC" Version="1.8.2505.32">
+			<GeneratePathProperty>true</GeneratePathProperty>
+		</PackageReference>
+	</ItemGroup>
+	<Target Name="CopyNativeBinaries" AfterTargets="Build">
+		<ItemGroup>
+			<!-- DirectStorage layout: native/bin/x64/ -->
+			<DsBinaries Include="$(PkgMicrosoft_Direct3D_DirectStorage)\native\bin\x64\*.dll" />
+			<!-- Agility SDK layout: build/native/bin/x64/ (Note the build/native prefix) -->
+			<D3dBinaries Include="$(PkgMicrosoft_Direct3D_D3D12)\build\native\bin\x64\D3D12Core.dll" />
+			<D3dBinaries Include="$(PkgMicrosoft_Direct3D_D3D12)\build\native\bin\x64\d3d12SDKLayers.dll" />
+			<!-- DXC Compiler layout: build/native/bin/x64/ -->
+			<DxcBinaries Include="$(PkgMicrosoft_Direct3D_DXC)\build\native\bin\x64\dxcompiler.dll" />
+			<DxcBinaries Include="$(PkgMicrosoft_Direct3D_DXC)\build\native\bin\x64\dxil.dll" />
+		</ItemGroup>
+		<!-- Copy DirectStorage and Compiler binaries to root -->
+		<Copy SourceFiles="@(DsBinaries)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(DxcBinaries)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+		<!-- Copy Agility SDK to D3D12 subfolder as required by the bootstrapper logic -->
+		<Copy SourceFiles="@(D3dBinaries)" DestinationFolder="$(OutDir)\D3D12" SkipUnchangedFiles="true" />
+	</Target>
+</Project>

@@ -1,0 +1,136 @@
+<Window xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:local="clr-namespace:GPCK.Avalonia" mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700" x:Class="GPCK.Avalonia.MainWindow" Title="GPCK Asset Browser" WindowStartupLocation="CenterScreen" Width="1280" Height="800" Background="#F3F3F3">
+	<Grid RowDefinitions="Auto,Auto,*,Auto">
+		<!-- Header -->
+		<Border Grid.Row="0" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="20,15">
+			<DockPanel>
+				<StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+					<TextBlock Name="TxtBackendStatus" Text="System Check..." Foreground="#999" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0"/>
+				</StackPanel>
+				<StackPanel>
+					<TextBlock Text="GPCK Asset Browser" FontSize="20" FontWeight="SemiBold" Foreground="#333"/>
+					<TextBlock Text="Next-Gen Asset Management System (.NET 10)" FontSize="12" Foreground="#888" Margin="0,2,0,0"/>
+				</StackPanel>
+			</DockPanel>
+		</Border>
+		<!-- Toolbar -->
+		<Border Grid.Row="1" Background="White" Padding="10" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1">
+			<Grid ColumnDefinitions="*, Auto">
+				<ScrollViewer Grid.Column="0" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+					<StackPanel Orientation="Horizontal" Spacing="8">
+						<Button Name="BtnOpenArchive" Content="📂 Open Archive" Classes="ModernBtn" Click="BtnOpenArchive_Click"/>
+						<Rectangle Width="1" Height="20" Fill="#EEE" VerticalAlignment="Center" Margin="4,0"/>
+						<Button Name="BtnAddFiles" Content="+ Add Files" Classes="ModernBtn" Click="BtnAddFiles_Click"/>
+						<Button Name="BtnAddFolder" Content="+ Add Folder" Classes="ModernBtn" Click="BtnAddFolder_Click"/>
+						<Button Name="BtnClear" Content="Clear List" Classes="DangerBtn" Click="BtnClear_Click"/>
+						<Rectangle Width="1" Height="20" Fill="#EEE" VerticalAlignment="Center" Margin="4,0"/>
+						<Button Name="BtnExtractSelected" Content="Extract Selected" Classes="ModernBtn" Click="BtnExtractSelected_Click"/>
+						<Button Name="BtnExtractAll" Content="Extract All" Classes="ModernBtn" Click="BtnExtractAll_Click"/>
+						<Button Name="BtnVerify" Content="Verify" Classes="ModernBtn" Click="BtnVerify_Click"/>
+						<ComboBox Name="CmbMethod" Width="110" SelectedIndex="0" VerticalAlignment="Center" SelectionChanged="CmbMethod_SelectionChanged">
+							<ComboBoxItem Content="Auto"/>
+							<ComboBoxItem Content="Zstd"/>
+							<ComboBoxItem Content="LZ4"/>
+							<ComboBoxItem Content="GDeflate"/>
+							<ComboBoxItem Content="Store"/>
+						</ComboBox>
+						<TextBlock Text="Lvl:" VerticalAlignment="Center" Margin="5,0,0,0" Foreground="#666" FontSize="12"/>
+						<NumericUpDown Name="NumLevel" Width="100" Minimum="1" Maximum="12" Value="6" VerticalAlignment="Center" FormatString="0"/>
+						<CheckBox Name="ChkMipSplit" Content="Mip Split" VerticalAlignment="Center" Margin="5,0"/>
+						<TextBox Name="TxtKey" Width="100" Watermark="Key (Opt)" PasswordChar="*" VerticalAlignment="Center" Margin="5,0"/>
+						<Button Name="BtnCompress" Content="🚀 Pack .gtoc" Classes="PrimaryBtn" Click="BtnCompress_Click" MinWidth="110"/>
+					</StackPanel>
+				</ScrollViewer>
+				<StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0" Spacing="5">
+					<TextBlock Text="🔍" VerticalAlignment="Center" Foreground="#AAA"/>
+					<TextBox Name="TxtSearch" Width="180" Height="28" Watermark="Search assets..." TextChanged="TxtSearch_TextChanged"/>
+				</StackPanel>
+			</Grid>
+		</Border>
+		<!-- Main Content -->
+		<Grid Grid.Row="2" RowDefinitions="Auto, *">
+			<!-- Tabs -->
+			<StackPanel Grid.Row="0" Orientation="Horizontal" Margin="15,10,0,0" Spacing="10">
+				<Button Name="TabExplorer" Content="Explorer" Classes="TabBtn Selected" Click="Tab_Clicked"/>
+				<Button Name="TabVisualizer" Content="Map Visualizer" Classes="TabBtn" Click="Tab_Clicked"/>
+			</StackPanel>
+			<Panel Grid.Row="1" Margin="10">
+				<!-- EXPLORER VIEW -->
+				<Grid Name="ExplorerView" ColumnDefinitions="2*, 4, 1*" IsVisible="True">
+					<!-- File List -->
+					<Grid Grid.Column="0" RowDefinitions="Auto, *">
+						<TextBlock Text="Package Contents" FontWeight="SemiBold" Margin="0,0,0,8" Foreground="#555"/>
+						<Border Grid.Row="1" Background="White" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4">
+							<ListBox Name="FileList" SelectionMode="Multiple,Toggle" Background="Transparent" SelectionChanged="FileList_SelectionChanged">
+								<ListBox.ItemTemplate>
+									<DataTemplate x:DataType="local:FileItem">
+										<Grid ColumnDefinitions="30, 4*, 100, 100, 150">
+											<TextBlock Grid.Column="0" Text="{Binding TypeIcon}" VerticalAlignment="Center"/>
+											<TextBlock Grid.Column="1" Text="{Binding DisplayName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+											<TextBlock Grid.Column="2" Text="{Binding Size}" Foreground="Gray" FontSize="12" VerticalAlignment="Center"/>
+											<TextBlock Grid.Column="3" Text="{Binding CompressionInfo}" Foreground="Gray" FontSize="11" VerticalAlignment="Center"/>
+											<TextBlock Grid.Column="4" Text="{Binding ManifestInfo}" Foreground="Gray" FontSize="11" VerticalAlignment="Center"/>
+										</Grid>
+									</DataTemplate>
+								</ListBox.ItemTemplate>
+							</ListBox>
+						</Border>
+					</Grid>
+					<GridSplitter Grid.Column="1" Background="Transparent" ResizeDirection="Columns"/>
+					<!-- Inspector -->
+					<Grid Grid.Column="2" RowDefinitions="Auto, *">
+						<TextBlock Text="Inspector" FontWeight="SemiBold" Margin="0,0,0,8" Foreground="#555"/>
+						<Border Grid.Row="1" Background="#1E1E1E" BorderBrush="#333" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
+							<Grid>
+								<TextBlock Name="LblNoPreview" Text="Select an asset to preview" Foreground="#666" VerticalAlignment="Center" HorizontalAlignment="Center" FontStyle="Italic"/>
+								<Image Name="ImgPreview" IsVisible="False" Stretch="Uniform"/>
+								<TextBox Name="TxtPreview" IsVisible="False" IsReadOnly="True" Background="Transparent" Foreground="#D4D4D4" BorderThickness="0" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"/>
+							</Grid>
+						</Border>
+					</Grid>
+				</Grid>
+				<!-- VISUALIZER VIEW -->
+				<Grid Name="VisualizerView" RowDefinitions="Auto, *" IsVisible="False">
+					<StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10" Spacing="10">
+						<TextBlock Text="Archive Fragmentation Map" FontWeight="SemiBold" Foreground="#555" VerticalAlignment="Center"/>
+						<StackPanel Orientation="Horizontal" Spacing="5">
+							<Border Background="LightGreen" Width="12" Height="12" CornerRadius="2"/>
+							<TextBlock Text="GDeflate" FontSize="11" VerticalAlignment="Center"/>
+						</StackPanel>
+						<StackPanel Orientation="Horizontal" Spacing="5">
+							<Border Background="LightBlue" Width="12" Height="12" CornerRadius="2"/>
+							<TextBlock Text="Zstd" FontSize="11" VerticalAlignment="Center"/>
+						</StackPanel>
+						<StackPanel Orientation="Horizontal" Spacing="5">
+							<Border Background="Orange" Width="12" Height="12" CornerRadius="2"/>
+							<TextBlock Text="LZ4" FontSize="11" VerticalAlignment="Center"/>
+						</StackPanel>
+					</StackPanel>
+					<Border Grid.Row="1" Background="#2D2D30" BorderBrush="#444" BorderThickness="1" CornerRadius="4" Padding="10">
+						<ScrollViewer>
+							<ItemsControl Name="VisualizerItems">
+								<ItemsControl.ItemsPanel>
+									<ItemsPanelTemplate>
+										<WrapPanel Orientation="Horizontal"/>
+									</ItemsPanelTemplate>
+								</ItemsControl.ItemsPanel>
+								<ItemsControl.ItemTemplate>
+									<DataTemplate x:DataType="local:BlockItem">
+										<Rectangle Width="{Binding Width}" Height="24" Fill="{Binding Color}" ToolTip.Tip="{Binding ToolTip}" Margin="0,1,1,0"/>
+									</DataTemplate>
+								</ItemsControl.ItemTemplate>
+							</ItemsControl>
+						</ScrollViewer>
+					</Border>
+				</Grid>
+			</Panel>
+		</Grid>
+		<!-- Status Bar -->
+		<Grid Grid.Row="3" Background="#007ACC" Height="30">
+			<TextBlock Name="TxtStatus" Text="Ready" Foreground="White" VerticalAlignment="Center" Margin="15,0" FontSize="12"/>
+			<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,15,0" Spacing="20">
+				<TextBlock Name="TxtListCount" Text="0 items" Foreground="#E0E0E0" FontSize="11" VerticalAlignment="Center"/>
+				<ProgressBar Name="ProgressBar" Width="180" Height="10" IsVisible="False" Foreground="White" Background="#005A9E" Minimum="0" Maximum="100"/>
+			</StackPanel>
+		</Grid>
+	</Grid>
+</Window>
