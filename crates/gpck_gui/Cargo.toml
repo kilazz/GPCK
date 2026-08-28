@@ -1,0 +1,27 @@
+[package]
+name = "gpck_gui"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "gpck_studio"
+path = "src/main.rs"
+
+[dependencies]
+gpck_core.workspace = true
+slint = "1.17.1"
+rfd.workspace = true
+anyhow.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Preview & Texture decoding dependencies
+twox-hash.workspace = true
+image.workspace = true
+image_dds.workspace = true
+bytemuck.workspace = true
+
+[build-dependencies]
+slint-build = "1.17.1"

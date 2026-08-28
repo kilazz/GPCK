@@ -1,0 +1,128 @@
+---
+# ==============================================================================
+# Clang-Format Configuration File
+# Compatible with modern C++ (C++17/C++20/C++23) and Visual Studio
+# ==============================================================================
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: Latest
+
+# ------------------------------------------------------------------------------
+# Indentation & Tabulation
+# ------------------------------------------------------------------------------
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+NamespaceIndentation: None
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+
+# ------------------------------------------------------------------------------
+# Line Length & Wrapping
+# ------------------------------------------------------------------------------
+ColumnLimit: 120
+BreakBeforeBinaryOperators: None
+BreakBeforeTernaryOperators: true
+BreakStringLiterals: true
+
+# ------------------------------------------------------------------------------
+# Brace Wrapping & Control Statements
+# ------------------------------------------------------------------------------
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: false
+  AfterClass: true
+  AfterControlStatement: Never
+  AfterEnum: true
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: true
+  AfterUnion: true
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyRecord: true
+  SplitEmptyNamespace: true
+
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortLambdasOnASingleLine: Inline
+
+# ------------------------------------------------------------------------------
+# Alignment
+# ------------------------------------------------------------------------------
+AlignAfterOpenBracket: Align
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: Consecutive
+AlignEscapedNewlines: Right
+AlignOperands: AlignAfterOperator
+AlignTrailingComments: true
+
+# ------------------------------------------------------------------------------
+# Pointer & Reference Alignment
+# ------------------------------------------------------------------------------
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+# ------------------------------------------------------------------------------
+# Spacing Rules
+# ------------------------------------------------------------------------------
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: false
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyBlock: false
+SpacesBeforeTrailingComments: 1
+SpacesInAngles: false
+SpacesInCStyleCastParentheses: false
+SpacesInContainerLiterals: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# ------------------------------------------------------------------------------
+# Templates & Modern C++
+# ------------------------------------------------------------------------------
+BreakTemplateDeclarations: Yes
+AlwaysBreakTemplateDeclarations: Yes
+PackConstructorInitializers: NextLine
+
+# ------------------------------------------------------------------------------
+# Include Sorting & Categorization
+# ------------------------------------------------------------------------------
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup
+IncludeCategories:
+  # C Standard Library Headers (<stdio.h>, <stdint.h>, etc.)
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  # C++ Standard Library Headers (<vector>, <string>, <memory>, etc.)
+  - Regex: '^<.*>'
+    Priority: 2
+  # Windows & DirectX API Headers (<windows.h>, <d3d12.h>, <dxgi.h>, etc.)
+  - Regex: '^<(d3d12|dxgi|d3dcommon|windows|wrl)\.h>'
+    Priority: 3
+  # Project & Third-Party Headers
+  - Regex: '.*'
+    Priority: 4
+
+# ------------------------------------------------------------------------------
+# Comments & Cleanup
+# ------------------------------------------------------------------------------
+FixNamespaceComments: true
+ReflowComments: true
+...

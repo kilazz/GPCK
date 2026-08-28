@@ -1,0 +1,66 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gpck_core",
+    "crates/gpck_godot",
+    "crates/gpck_cli",
+    "crates/gpck_gui",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+authors = ["GPCK Contributors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Internal core crate
+gpck_core = { path = "crates/gpck_core" }
+
+# Serialization & Memory
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+bytemuck = { version = "1.25.2", features = ["derive"] }
+uuid = { version = "1.24.1", features = ["v4"] }
+twox-hash = "2.1.3"
+memmap2 = "0.9.11"
+bitflags = "2.13.1"
+
+# Compression & Cryptography
+lz4_flex = "0.14.0"
+zstd = "0.13.3"
+aes-gcm = "0.11.1"
+sha2 = "0.11.0"
+pbkdf2 = "0.13.0"
+hmac = "0.13.0"
+rand = "0.10.2"
+
+# GPU & System Interop
+ash = "0.38.0"
+libloading = "0.9.0"
+
+# Concurrency & Async I/O
+rayon = "1.12.0"
+crossbeam-channel = "0.5.16"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "macros", "fs"] }
+reqwest = { version = "0.13.4", features = ["blocking"] }
+
+# Graphics & Texture Decoding
+image = { version = "0.25.10", default-features = false, features = ["dds", "png", "jpeg"] }
+image_dds = "0.7.2"
+
+# Diagnostics, CLI & File System
+clap = { version = "4.6.6", features = ["derive"] }
+walkdir = "2.5.0"
+rfd = "0.17.2"
+anyhow = "1.0.104"
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+tracing-appender = "0.2.5"
+
+# Release Optimization
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

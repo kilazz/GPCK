@@ -1,0 +1,19 @@
+[package]
+name = "gpck_godot"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = { version = "0.2", features = ["experimental-threads"] }
+gpck_core.workspace = true
+
+# Texture decoders & memory
+image.workspace = true
+image_dds.workspace = true
+bytemuck.workspace = true
+
+uuid.workspace = true
+anyhow.workspace = true

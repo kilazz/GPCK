@@ -1,0 +1,342 @@
+// ui/components/explorer_tab.slint
+import {
+    VerticalBox,
+    HorizontalBox,
+    ScrollView,
+    TextEdit,
+    ProgressIndicator,
+    LineEdit,
+    CheckBox,
+    ComboBox,
+} from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct FileItemUI {
+    rel_path: string,
+    format_str: string,
+    gacl_str: string,
+    queue_str: string,
+    size_str: string,
+    comp_size_str: string,
+    ratio_str: string,
+    method_str: string,
+    is_archive: bool,
+}
+
+export component ExplorerTab inherits HorizontalBox {
+    padding: 0px;
+    spacing: 10px;
+
+    in-out property <[FileItemUI]> file_list: [];
+    in-out property <int> selected_file_index: -1;
+    in-out property <int> sort_column: 0;
+    in-out property <bool> sort_ascending: true;
+    in-out property <string> search_text: "";
+
+    in-out property <bool> is_preview_loading: false;
+    in-out property <bool> show_image: false;
+    in-out property <image> preview_image;
+    in-out property <string> preview_text: "";
+    in-out property <bool> decondition_gacl_preview: true;
+    in-out property <int> tonemap_mode_index: 0;
+
+    callback file_selected(string);
+    callback sort_column_clicked(int);
+    callback tonemap_mode_changed(int);
+
+    // Left Column: Table of Contents
+    Rectangle {
+        background: Theme.card_bg;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: Theme.card_border;
+        horizontal-stretch: 3;
+
+        VerticalBox {
+            padding: 8px;
+            spacing: 6px;
+
+            HorizontalLayout {
+                height: 28px;
+                Text {
+                    text: "Package Contents (" + root.file_list.length + " assets)";
+                    font-weight: 700;
+                    font-size: 13px;
+                    color: Theme.text_light;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                LineEdit {
+                    placeholder-text: "🔍 Search assets...";
+                    text <=> root.search_text;
+                    width: 220px;
+                }
+            }
+
+            // Table Header
+            HorizontalBox {
+                padding-left: 6px;
+                padding-right: 6px;
+                height: 22px;
+
+                TouchArea {
+                    width: 26%;
+                    clicked => { root.sort_column_clicked(0); }
+                    Text {
+                        text: "File Path " + (root.sort_column == 0 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    width: 8%;
+                    clicked => { root.sort_column_clicked(1); }
+                    Text {
+                        text: "Format " + (root.sort_column == 1 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    width: 12%;
+                    clicked => { root.sort_column_clicked(2); }
+                    Text {
+                        text: "GACL " + (root.sort_column == 2 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    width: 12%;
+                    clicked => { root.sort_column_clicked(3); }
+                    Text {
+                        text: "Queue " + (root.sort_column == 3 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    width: 12%;
+                    clicked => { root.sort_column_clicked(4); }
+                    Text {
+                        text: "Orig Size " + (root.sort_column == 4 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    width: 12%;
+                    clicked => { root.sort_column_clicked(5); }
+                    Text {
+                        text: "Comp Size " + (root.sort_column == 5 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+
+                TouchArea {
+                    width: 18%;
+                    clicked => { root.sort_column_clicked(6); }
+                    Text {
+                        text: "Ratio " + (root.sort_column == 6 ? (root.sort_ascending ? "▲" : "▼") : "");
+                        font-weight: 700;
+                        color: Theme.text_muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: Theme.card_border;
+            }
+
+            ScrollView {
+                VerticalBox {
+                    alignment: start;
+                    padding: 1px;
+                    spacing: 2px;
+
+                    for item[index] in root.file_list: TouchArea {
+                        height: 26px;
+                        clicked => {
+                            root.selected_file_index = index;
+                            root.file_selected(item.rel_path);
+                        }
+
+                        Rectangle {
+                            background: root.selected_file_index == index ? Theme.primary_accent : (Math.mod(index, 2) == 0 ? #252526 : #2a2a2c);
+                            border-radius: 3px;
+
+                            HorizontalBox {
+                                padding-left: 6px;
+                                padding-right: 6px;
+
+                                Text {
+                                    text: item.rel_path;
+                                    width: 26%;
+                                    color: #ffffff;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                    font-weight: root.selected_file_index == index ? 700 : 400;
+                                }
+
+                                Text {
+                                    text: item.format_str;
+                                    width: 8%;
+                                    color: root.selected_file_index == index ? #ffffff : Theme.format_cyan;
+                                    vertical-alignment: center;
+                                    font-weight: 700;
+                                }
+
+                                Text {
+                                    text: item.gacl_str;
+                                    width: 12%;
+                                    color: root.selected_file_index == index ? #ffffff : Theme.gacl_orange;
+                                    vertical-alignment: center;
+                                    font-weight: 700;
+                                }
+
+                                Text {
+                                    text: item.queue_str;
+                                    width: 12%;
+                                    color: root.selected_file_index == index ? #ffffff : (item.queue_str == "Hard (High Pri)" ? Theme.queue_red : Theme.queue_green);
+                                    vertical-alignment: center;
+                                    font-weight: 700;
+                                }
+
+                                Text {
+                                    text: item.size_str;
+                                    width: 12%;
+                                    color: root.selected_file_index == index ? #ffffff : #aaaaaa;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: item.comp_size_str;
+                                    width: 12%;
+                                    color: root.selected_file_index == index ? #ffffff : #aaaaaa;
+                                    vertical-alignment: center;
+                                }
+
+                                Text {
+                                    text: item.method_str + " (" + item.ratio_str + ")";
+                                    width: 18%;
+                                    color: root.selected_file_index == index ? #ffffff : (item.is_archive ? #4caf50 : #cccccc);
+                                    vertical-alignment: center;
+                                    font-weight: 700;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Right Column: Inspector & Preview
+    Rectangle {
+        background: Theme.inspector_bg;
+        border-radius: 4px;
+        border-width: 1px;
+        border-color: Theme.card_border;
+        horizontal-stretch: 2;
+
+        VerticalBox {
+            padding: 10px;
+            spacing: 6px;
+
+            HorizontalLayout {
+                height: 24px;
+                spacing: 8px;
+
+                Text {
+                    text: "Inspector & Preview";
+                    font-weight: 700;
+                    font-size: 13px;
+                    color: Theme.text_light;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                ComboBox {
+                    model: ["Tonemap: None", "PBR Neutral", "False Color (Heatmap)", "ACES Filmic"];
+                    current-index <=> root.tonemap_mode_index;
+                    selected(val) => { root.tonemap_mode_changed(root.tonemap_mode_index); }
+                    width: 175px;
+                }
+
+                CheckBox {
+                    text: "Unshuffle GACL";
+                    checked <=> root.decondition_gacl_preview;
+                }
+            }
+
+            Rectangle {
+                background: #141414;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: #2a2a2a;
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+                clip: true;
+
+                if root.is_preview_loading: VerticalBox {
+                    alignment: center;
+                    ProgressIndicator {
+                        indeterminate: true;
+                    }
+
+                    Text {
+                        text: "Decoding Texture (BCn / HDR)...";
+                        horizontal-alignment: center;
+                        color: #888888;
+                        font-size: 12px;
+                    }
+                }
+
+                if root.show_image && !root.is_preview_loading: Image {
+                    width: 100%;
+                    height: 100%;
+                    source: root.preview_image;
+                    image-fit: contain;
+                }
+
+                if !root.show_image && !root.is_preview_loading: TextEdit {
+                    read-only: true;
+                    text: root.preview_text != "" ? root.preview_text : "Select an asset to preview metadata / binary dump";
+                    font-family: "Consolas";
+                    font-size: 12px;
+                    wrap: word-wrap;
+                    width: 100%;
+                    height: 100%;
+                }
+            }
+        }
+    }
+}

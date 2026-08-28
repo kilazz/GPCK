@@ -1,0 +1,96 @@
+[package]
+name = "gpck_core"
+version.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[lib]
+name = "gpck_core"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = [
+    "gpu-vulkan",
+    "gpu-directstorage",
+    "geometry",
+    "crypto",
+    "texture-decoders",
+    "remote-cdn",
+]
+
+# GPU Hardware Acceleration Pipelines
+gpu-vulkan = ["dep:ash"]
+gpu-directstorage = ["dep:windows"]
+
+# 3D Geometry Processing (Meshlets, DMM, DGF, OBJ)
+geometry = []
+
+# AES-256-GCM & PBKDF2 Cryptography
+crypto = ["dep:aes-gcm", "dep:sha2", "dep:pbkdf2", "dep:hmac", "dep:rand"]
+
+# CPU Texture Decoding (image, image_dds)
+texture-decoders = ["dep:image", "dep:image_dds"]
+
+# Remote CDN Chunk Streaming over HTTP/HTTPS
+remote-cdn = ["dep:reqwest"]
+
+[dependencies]
+# Memory & Serialization (Core)
+serde.workspace = true
+serde_json.workspace = true
+bytemuck.workspace = true
+uuid.workspace = true
+twox-hash.workspace = true
+memmap2.workspace = true
+bitflags.workspace = true
+
+# Core Compression Codecs
+lz4_flex.workspace = true
+zstd.workspace = true
+
+# Concurrency & Async I/O
+rayon.workspace = true
+crossbeam-channel.workspace = true
+tokio.workspace = true
+reqwest = { workspace = true, optional = true }
+
+# Cryptography & Integrity (Optional: feature = "crypto")
+aes-gcm = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+pbkdf2 = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+
+# GPU & System Interop (Optional: feature = "gpu-vulkan")
+ash = { workspace = true, optional = true }
+libloading.workspace = true
+
+# Graphics & Texture Decoding (Optional: feature = "texture-decoders")
+image = { workspace = true, optional = true }
+image_dds = { workspace = true, optional = true }
+
+# Diagnostics & File System
+walkdir.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_Com"
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.7.14"
+libc = "0.2.189"
+
+[build-dependencies]
+cc = "1.4.4"
