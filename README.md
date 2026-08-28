@@ -23,25 +23,18 @@ CLI
 ```
 # Build
 cargo build --release
-
 # Pack (DirectStorage + 64KB Sparse Tiles)
 gpck pack ./Assets ./Build/Game.gtoc --preset "GPU Streaming"
-
 # Pack (Brotli-G L11 + GACL + RDO + AES-256-GCM)
 gpck pack ./Assets ./Build/Game.gtoc -m brotli-g -l 11 --gacl --rdo 100 --sparse-tiles 64k --key "Passphrase"
-
 # Pack (GDeflate + ATG 256KB Bounds)
 gpck pack ./Assets ./Build/Game.gtoc -m gdeflate -l 9 --atg-bounds 256k
-
 # Unpack
 gpck unpack ./Build/Game.gtoc ./Extracted/ --recombine-mips
-
 # Verify
 gpck verify ./Build/Game.gtoc --key "Passphrase"
-
 # Delta Patch
 gpck patch ./Game_v1.gtoc ./NewFiles/ ./Patch_v2.gtoc
-
 # Diagnostic Benchmark
 gpck bench --full
 ```
