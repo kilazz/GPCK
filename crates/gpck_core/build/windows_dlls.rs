@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 #[cfg(target_os = "windows")]
 pub fn copy_windows_dlls(env: &SdkEnvironment) {
-    let nuget_search = match resolve_external_path(env, "nuget") {
+    let nuget_search = match resolve_external_path(env, "external/nuget")
+        .or_else(|| resolve_external_path(env, "nuget"))
+    {
         Some(p) => p,
         None => return,
     };

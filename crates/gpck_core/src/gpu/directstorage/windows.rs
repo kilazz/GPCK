@@ -582,11 +582,18 @@ fn load_dstorage_library() -> GpckResult<&'static libloading::Library> {
         candidates.push(PathBuf::from("target/release/dstorage.dll"));
         candidates.push(PathBuf::from("target/debug/dstorage.dll"));
 
-        if let Ok(entries) = std::fs::read_dir("nuget") {
-            for entry in entries.filter_map(|e| e.ok()) {
-                let bin_dll = entry.path().join("native/bin/x64/dstorage.dll");
-                if bin_dll.exists() {
-                    candidates.push(bin_dll);
+        for base_dir in &[
+            "external/nuget",
+            "nuget",
+            "../../external/nuget",
+            "../../nuget",
+        ] {
+            if let Ok(entries) = std::fs::read_dir(base_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let bin_dll = entry.path().join("native/bin/x64/dstorage.dll");
+                    if bin_dll.exists() {
+                        candidates.push(bin_dll);
+                    }
                 }
             }
         }

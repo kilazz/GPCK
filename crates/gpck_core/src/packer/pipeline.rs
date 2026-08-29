@@ -27,9 +27,8 @@ struct PbrMaterialSlot {
     base_rel_path: String,
     albedo_path: Option<PathBuf>,
     normal_path: Option<PathBuf>,
-    ddna_path: Option<PathBuf>,
-    spec_or_metal_path: Option<PathBuf>,
-    roughness_or_gloss_path: Option<PathBuf>,
+    metallic_path: Option<PathBuf>,
+    roughness_path: Option<PathBuf>,
     ao_path: Option<PathBuf>,
     displacement_path: Option<PathBuf>,
 }
@@ -63,15 +62,9 @@ impl PackingPipeline {
             pending_files = remaining;
 
             for bundle_slot in pbr_bundles {
-                let has_ddna = bundle_slot.ddna_path.is_some();
                 log_fn(&format!(
-                    "[Neural PBR] Bundling material: {}.gntc{}",
-                    bundle_slot.base_rel_path,
-                    if has_ddna {
-                        " (CryEngine DDNA detected)"
-                    } else {
-                        ""
-                    }
+                    "[Neural PBR] Bundling standard PBR material: {}.gntc",
+                    bundle_slot.base_rel_path
                 ));
 
                 if let Ok(processed_gntc) = Self::pack_clustered_material(&bundle_slot, options) {
@@ -172,7 +165,7 @@ impl PackingPipeline {
         emitter::write_master_toc(&processed_files, &gtoc_path, options.key)
     }
 
-    /// Clusters loose PBR maps using customizable suffix rules and CryEngine DDNA detection.
+    /// Clusters loose PBR maps using standard customizable suffix rules.
     fn cluster_pbr_materials(
         files: &[(PathBuf, String)],
         options: &PackerOptions,
@@ -183,15 +176,11 @@ impl PackingPipeline {
         let sfx = &options.ntc.pbr_suffixes;
 
         let mut rule_list: Vec<(&str, u8)> = Vec::new();
-        rule_list.push(("_ddna", 6));
-
         for s in &sfx.albedo {
             rule_list.push((s.as_str(), 0));
         }
         for s in &sfx.normal {
-            if s != "_ddna" {
-                rule_list.push((s.as_str(), 1));
-            }
+            rule_list.push((s.as_str(), 1));
         }
         for s in &sfx.metallic {
             rule_list.push((s.as_str(), 2));
@@ -233,16 +222,10 @@ impl PackingPipeline {
                     match map_type {
                         0 => entry.albedo_path = Some(abs_path.clone()),
                         1 => entry.normal_path = Some(abs_path.clone()),
-                        2 => entry.spec_or_metal_path = Some(abs_path.clone()),
-                        3 => entry.roughness_or_gloss_path = Some(abs_path.clone()),
+                        2 => entry.metallic_path = Some(abs_path.clone()),
+                        3 => entry.roughness_path = Some(abs_path.clone()),
                         4 => entry.ao_path = Some(abs_path.clone()),
                         5 => entry.displacement_path = Some(abs_path.clone()),
-                        6 => {
-                            entry.ddna_path = Some(abs_path.clone());
-                            if entry.normal_path.is_none() {
-                                entry.normal_path = Some(abs_path.clone());
-                            }
-                        }
                         _ => {}
                     }
 
@@ -260,13 +243,13 @@ impl PackingPipeline {
             if slot.albedo_path.is_some() {
                 channel_count += 1;
             }
-            if slot.normal_path.is_some() || slot.ddna_path.is_some() {
+            if slot.normal_path.is_some() {
                 channel_count += 1;
             }
-            if slot.spec_or_metal_path.is_some() {
+            if slot.metallic_path.is_some() {
                 channel_count += 1;
             }
-            if slot.roughness_or_gloss_path.is_some() || slot.ddna_path.is_some() {
+            if slot.roughness_path.is_some() {
                 channel_count += 1;
             }
             if slot.ao_path.is_some() {
@@ -306,31 +289,24 @@ impl PackingPipeline {
             .as_ref()
             .and_then(|p| std::fs::read(p).ok());
 
-        let normal = if let Some(ref ddna_p) = slot.ddna_path {
-            std::fs::read(ddna_p).ok()
-        } else {
-            slot.normal_path
-                .as_ref()
-                .and_then(|p| std::fs::read(p).ok())
-        };
-
-        let metallic = slot
-            .spec_or_metal_path
+        let normal = slot
+            .normal_path
             .as_ref()
             .and_then(|p| std::fs::read(p).ok());
 
-        let roughness = if let Some(ref rgh_p) = slot.roughness_or_gloss_path {
-            std::fs::read(rgh_p).ok()
-        } else if let Some(ref ddna_p) = slot.ddna_path {
-            std::fs::read(ddna_p).ok()
-        } else {
-            None
-        };
+        let metallic = slot
+            .metallic_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok());
+
+        let roughness = slot
+            .roughness_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok());
 
         let ao = slot.ao_path.as_ref().and_then(|p| std::fs::read(p).ok());
 
         let mut bundle = NtcPbrMaterialBundle::new(width, height);
-        // Pass the entire raw DDS vectors directly (do not slice raw bytes!)
         bundle.albedo = albedo;
         bundle.normal = normal;
         bundle.metallic = metallic;

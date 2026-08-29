@@ -1,6 +1,7 @@
-// crates/gpck_core/shaders/NTC/NTCDecompressDP4a.hlsl
+// shaders/NTC/NTCDecompressDP4a.hlsl
 // GPCK Native DP4a / LinAlg Neural Texture Decompressor
-// Hardware Accelerated on AMD RDNA 2/3 & All Shader Model 6.0+ GPUs
+// Hardware Accelerated on AMD RDNA 2/3/4, NVIDIA & All Shader Model 6.0+ GPUs
+// Industry Standard PBR Layout: Albedo RGB, Tangent Normal, ORM (AO / Rough / Metal)
 
 #define NTC_BLOCK_WIDTH 8
 #define NTC_BLOCK_HEIGHT 8
@@ -115,7 +116,7 @@ void main(uint3 dtID : SV_DispatchThreadID, uint3 gtID : SV_GroupThreadID) {
     Unpack8Halfs(t_GridBuffer.Load4(off11), f11_0, f11_1);
 
     float4 feat0 = f00_0 * w00 + f10_0 * w10 + f01_0 * w01 + f11_0 * w11;
-    float4 feat1 = f00_1 * w00 + f10_1 * w10 + f01_1 * w01 + f11_1 * w11;
+    float4 feat1 = f00_1 * w00 + f10_1 * w10 + f01_1 * w01 + f11_0 * w11;
 
     // Evaluate Tiny MLP with DP4a
     uint inputs[4];
@@ -144,8 +145,12 @@ void main(uint3 dtID : SV_DispatchThreadID, uint3 gtID : SV_GroupThreadID) {
         }
     }
 
-    // Multi-Surface Material Output (Albedo, Normal XY, ORM)
+    // Standard PBR Texture Outputs
+    // outRaw0: [0: Albedo R, 1: Albedo G, 2: Albedo B, 3: Normal X]
+    // outRaw1: [4: Normal Y, 5: AO / Occlusion, 6: Roughness, 7: Metallic]
     u_OutAlbedo[dtID.xy] = float4(outRaw0.rgb, 1.0f);
     u_OutNormal[dtID.xy] = float4(outRaw0.a, outRaw1.r, 1.0f, 1.0f);
+
+    // Strict Industry Standard ORM: R = AO (outRaw1.g), G = Roughness (outRaw1.b), B = Metallic (outRaw1.a)
     u_OutORM[dtID.xy]    = float4(outRaw1.g, outRaw1.b, outRaw1.a, 1.0f);
 }

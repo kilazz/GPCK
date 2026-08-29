@@ -21,11 +21,11 @@ export component SettingsTab inherits ScrollView {
     in-out property <bool> tiled-streaming-enabled: true;
     in-out property <int> min-tiled-res-index: 0;
 
-    // MiniDXNN Native Neural Textures
+    // MiniDXNN Native Neural Textures (Artist-Friendly Controls)
     in-out property <bool> ntc-enabled: false;
-    in-out property <float> ntc-target-bpp: 5.0;
+    in-out property <float> ntc-target-bpp: 6.0;
     in-out property <int> ntc-encoding-index: 0;
-    in-out property <int> ntc-grid-res-index: 1;
+    in-out property <int> ntc-grid-res-index: 0;
     in-out property <int> ntc-optimizer-index: 0;
     in-out property <int> ntc-quality-index: 1;
     in-out property <bool> ntc-auto-bundle: true;
@@ -34,12 +34,12 @@ export component SettingsTab inherits ScrollView {
     in-out property <int> ntc-inference-mode-index: 0;
 
     // PBR Suffix Rules
-    in-out property <string> pbr-suffix-albedo: "_diff, _albedo, _basecolor, _color, _col, _d";
-    in-out property <string> pbr-suffix-normal: "_ddn, _ddna, _normal, _norm, _nrm, _n";
-    in-out property <string> pbr-suffix-metal: "_spec, _specular, _metal, _metallic, _m";
-    in-out property <string> pbr-suffix-rough: "_gloss, _rough, _roughness, _r";
-    in-out property <string> pbr-suffix-ao: "_ao, _ambient, _occlusion";
-    in-out property <string> pbr-suffix-displ: "_displ, _disp, _height, _h";
+    in-out property <string> pbr-suffix-albedo: "_albedo, _basecolor, _diff, _color, _col, _d";
+    in-out property <string> pbr-suffix-normal: "_normal, _norm, _nrm, _n, _nor";
+    in-out property <string> pbr-suffix-metal: "_metal, _metallic, _metalness, _m, _met, _spec";
+    in-out property <string> pbr-suffix-rough: "_rough, _roughness, _rgh, _r, _gloss";
+    in-out property <string> pbr-suffix-ao: "_ao, _ambient, _occlusion, _ambientocclusion";
+    in-out property <string> pbr-suffix-displ: "_disp, _displ, _height, _h, _bump";
 
     // GACL & RDO
     in-out property <bool> gacl-enabled: true;
@@ -110,7 +110,7 @@ export component SettingsTab inherits ScrollView {
                     width: 440px;
                     model: [
                         "GPU Streaming (PC / DirectStorage)",
-                        "Next-Gen Neural PBR (MiniDXNN / DP4a / 5 bpp)",
+                        "Next-Gen Neural PBR (MiniDXNN / DP4a / ORM)",
                         "Mobile / Android (ASTC / ETC2 + LZ4)",
                         "Maximum Compression (Distribution)",
                         "Fast Dev Build (Iteration)",
@@ -225,7 +225,7 @@ export component SettingsTab inherits ScrollView {
                 }
 
                 Card {
-                    title: "[NEURAL] Hardware GPU Neural Material Engine (MiniDXNN / DP4a)";
+                    title: "[NEURAL] Neural PBR Material Compression (MiniDXNN / DP4a)";
                     header-color: Theme.accent-emerald;
 
                     VerticalLayout {
@@ -234,12 +234,12 @@ export component SettingsTab inherits ScrollView {
                         HorizontalLayout {
                             alignment: space-between;
                             CheckBox {
-                                text: "Enable Neural Textures (MiniDXNN)";
+                                text: "Enable Neural PBR Compression (Pack 5 maps into 1 asset)";
                                 checked <=> root.ntc-enabled;
                             }
 
                             CheckBox {
-                                text: "Auto-Bundle PBR Materials";
+                                text: "Auto-Bundle PBR Sets";
                                 checked <=> root.ntc-auto-bundle;
                                 enabled: root.ntc-enabled;
                             }
@@ -250,80 +250,39 @@ export component SettingsTab inherits ScrollView {
 
                             Row {
                                 Text {
-                                    text: "Input Encoding:";
+                                    text: "Material Quality:";
                                     color: #D1D5DB;
                                     font-size: 12px;
                                     vertical-alignment: center;
-                                    width: 130px;
+                                    width: 140px;
                                 }
 
                                 ComboBox {
                                     model: [
-                                        "Bilinear Grid (Fast & Detailed)",
-                                        "Positional Frequencies (Fourier)",
-                                        "Identity / Raw Coordinates"
-                                    ];
-                                    current-index <=> root.ntc-encoding-index;
-                                    enabled: root.ntc-enabled;
-                                }
-                            }
-
-                            Row {
-                                Text {
-                                    text: "Grid / Latent Density:";
-                                    color: #D1D5DB;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                    width: 130px;
-                                }
-
-                                ComboBox {
-                                    model: [
-                                        "Grid 64x64 (Fast / ~5.0 bpp)",
-                                        "Grid 128x128 (Balanced / ~8.0 bpp)",
-                                        "Grid 256x256 (High Quality / ~12.0 bpp)",
-                                        "Grid 512x512 (Ultra 4K Crisp / ~16.0 bpp)",
-                                        "Grid 1024x1024 (Extreme 4K Native / ~20.0 bpp)"
+                                        "High Quality (1/4 Size — ~8x VRAM Savings) [Recommended]",
+                                        "Ultra / Hero Asset (1/2 Size — ~4x VRAM Savings)",
+                                        "Balanced / Game Ready (1/8 Size — ~16x VRAM Savings)",
+                                        "Aggressive / Background (1/16 Size — ~32x VRAM Savings)"
                                     ];
                                     current-index <=> root.ntc-grid-res-index;
-                                    enabled: root.ntc-enabled && root.ntc-encoding-index == 0;
-                                }
-                            }
-
-                            Row {
-                                Text {
-                                    text: "GPU Optimizer:";
-                                    color: #D1D5DB;
-                                    font-size: 12px;
-                                    vertical-alignment: center;
-                                    width: 130px;
-                                }
-
-                                ComboBox {
-                                    model: [
-                                        "Lion (Sign Momentum — Recommended)",
-                                        "Adam (Adaptive Moments)",
-                                        "SGD (Stochastic Gradient)"
-                                    ];
-                                    current-index <=> root.ntc-optimizer-index;
                                     enabled: root.ntc-enabled;
                                 }
                             }
 
                             Row {
                                 Text {
-                                    text: "Training Quality:";
+                                    text: "Bake Time / Quality:";
                                     color: #D1D5DB;
                                     font-size: 12px;
                                     vertical-alignment: center;
-                                    width: 130px;
+                                    width: 140px;
                                 }
 
                                 ComboBox {
                                     model: [
-                                        "Fast (10 Epochs / Rapid Preview)",
-                                        "Balanced (30 Epochs — Standard)",
-                                        "High Quality (100 Epochs)"
+                                        "Draft (Fast Preview — ~1s)",
+                                        "Production Quality (Standard — ~5s)",
+                                        "Maximum Convergence (Final Build — ~15s)"
                                     ];
                                     current-index <=> root.ntc-quality-index;
                                     enabled: root.ntc-enabled;
@@ -332,18 +291,18 @@ export component SettingsTab inherits ScrollView {
 
                             Row {
                                 Text {
-                                    text: "Inference Target:";
+                                    text: "Hardware Target:";
                                     color: #D1D5DB;
                                     font-size: 12px;
                                     vertical-alignment: center;
-                                    width: 130px;
+                                    width: 140px;
                                 }
 
                                 ComboBox {
                                     model: [
-                                        "Universal DP4a (AMD RDNA 2/3, RX6000+, Intel, GeForce)",
-                                        "DirectX 12 LinAlg Matrix (SM 6.10)",
-                                        "CPU Fallback (SIMD / Multi-Threaded)"
+                                        "Universal GPU (AMD RDNA 2/3/4, NVIDIA, Intel Arc, Mobile)",
+                                        "DirectX 12 Ultimate LinAlg (SM 6.10+)",
+                                        "CPU Software Fallback (SIMD)"
                                     ];
                                     current-index <=> root.ntc-inference-mode-index;
                                     enabled: root.ntc-enabled;
@@ -351,21 +310,27 @@ export component SettingsTab inherits ScrollView {
                             }
                         }
 
-                        HorizontalLayout {
-                            spacing: 12px;
-                            CheckBox {
-                                text: "Wave-Reduced Bias Accumulation (WaveActiveSum)";
-                                checked <=> root.ntc-wave-reduced-accum;
-                                enabled: root.ntc-enabled;
-                            }
+                        // Informational Badge
+                        Rectangle {
+                            background: #18221D;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: #10B981;
 
-                            CheckBox {
-                                text: "Precompute BC7 Mode Bitmaps (<0.05ms Transcode)";
-                                checked <=> root.ntc-precompute-bc7-modes;
-                                enabled: root.ntc-enabled;
+                            HorizontalLayout {
+                                padding: 8px;
+                                spacing: 8px;
+                                Text {
+                                    text: "💡 Standard PBR Layout: Albedo RGB, Tangent Normal, and ORM (R = Occlusion, G = Roughness, B = Metallic) in a single streaming container.";
+                                    color: #A7F3D0;
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                }
                             }
                         }
 
+                        // Suffix Matching Rules
                         Rectangle {
                             background: Theme.surface-nested;
                             border-radius: 4px;
@@ -377,7 +342,7 @@ export component SettingsTab inherits ScrollView {
                                 spacing: 6px;
 
                                 Text {
-                                    text: "Customizable PBR Suffix Rules (CryEngine / Unreal / Unity):";
+                                    text: "Texture Suffix Presets (Auto-Matching Rules):";
                                     color: Theme.accent-cyan;
                                     font-size: 11px;
                                     font-weight: 700;
@@ -392,7 +357,7 @@ export component SettingsTab inherits ScrollView {
                                             color: Theme.text-muted;
                                             font-size: 11px;
                                             vertical-alignment: center;
-                                            width: 60px;
+                                            width: 65px;
                                         }
 
                                         LineEdit {
@@ -405,7 +370,7 @@ export component SettingsTab inherits ScrollView {
                                             color: Theme.text-muted;
                                             font-size: 11px;
                                             vertical-alignment: center;
-                                            width: 60px;
+                                            width: 65px;
                                         }
 
                                         LineEdit {
@@ -416,11 +381,11 @@ export component SettingsTab inherits ScrollView {
 
                                     Row {
                                         Text {
-                                            text: "Metal/Spec:";
+                                            text: "Metallic:";
                                             color: Theme.text-muted;
                                             font-size: 11px;
                                             vertical-alignment: center;
-                                            width: 60px;
+                                            width: 65px;
                                         }
 
                                         LineEdit {
@@ -429,11 +394,11 @@ export component SettingsTab inherits ScrollView {
                                         }
 
                                         Text {
-                                            text: "Rough/Gloss:";
+                                            text: "Roughness:";
                                             color: Theme.text-muted;
                                             font-size: 11px;
                                             vertical-alignment: center;
-                                            width: 60px;
+                                            width: 65px;
                                         }
 
                                         LineEdit {
@@ -444,11 +409,11 @@ export component SettingsTab inherits ScrollView {
 
                                     Row {
                                         Text {
-                                            text: "AO:";
+                                            text: "AO / Occl:";
                                             color: Theme.text-muted;
                                             font-size: 11px;
                                             vertical-alignment: center;
-                                            width: 60px;
+                                            width: 65px;
                                         }
 
                                         LineEdit {
@@ -457,11 +422,11 @@ export component SettingsTab inherits ScrollView {
                                         }
 
                                         Text {
-                                            text: "Displacement:";
+                                            text: "Height/Disp:";
                                             color: Theme.text-muted;
                                             font-size: 11px;
                                             vertical-alignment: center;
-                                            width: 60px;
+                                            width: 65px;
                                         }
 
                                         LineEdit {

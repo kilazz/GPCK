@@ -584,15 +584,31 @@ export component ExplorerTab inherits HorizontalLayout {
                     }
 
                     image-pan-touch := TouchArea {
+                        property <length> start-pan-x: 0px;
+                        property <length> start-pan-y: 0px;
+
                         mouse-cursor: self.pressed ? grabbing : grab;
-                        moved => {
-                            if (self.pressed) {
-                                let max-pan-x = parent.width * max(1.0, root.preview-zoom);
-                                let max-pan-y = parent.height * max(1.0, root.preview-zoom);
-                                root.preview-offset-x = max(-max-pan-x, min(max-pan-x, root.preview-offset-x + (self.mouse-x - self.pressed-x)));
-                                root.preview-offset-y = max(-max-pan-y, min(max-pan-y, root.preview-offset-y + (self.mouse-y - self.pressed-y)));
+
+                        pointer-event(event) => {
+                            if (event.kind == PointerEventKind.down) {
+                                self.start-pan-x = root.preview-offset-x;
+                                self.start-pan-y = root.preview-offset-y;
                             }
                         }
+
+                        moved => {
+                            if (self.pressed) {
+                                let target-x = self.start-pan-x + (self.mouse-x - self.pressed-x);
+                                let target-y = self.start-pan-y + (self.mouse-y - self.pressed-y);
+
+                                let max-pan-x = parent.width * max(1.0, root.preview-zoom * 2.0);
+                                let max-pan-y = parent.height * max(1.0, root.preview-zoom * 2.0);
+
+                                root.preview-offset-x = max(-max-pan-x, min(max-pan-x, target-x));
+                                root.preview-offset-y = max(-max-pan-y, min(max-pan-y, target-y));
+                            }
+                        }
+
                         scroll-event(event) => {
                             if (event.delta-y > 0) {
                                 root.preview-zoom = min(32.0, root.preview-zoom * 1.15);
@@ -601,6 +617,7 @@ export component ExplorerTab inherits HorizontalLayout {
                             }
                             return accept;
                         }
+
                         double-clicked => {
                             root.preview-zoom = 1.0;
                             root.preview-offset-x = 0px;

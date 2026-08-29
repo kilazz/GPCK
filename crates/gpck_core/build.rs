@@ -19,7 +19,7 @@ mod shaders;
 mod windows_dlls;
 
 fn main() {
-    println!("cargo:rerun-if-changed=shaders");
+    println!("cargo:rerun-if-changed=../../shaders");
     println!("cargo:rerun-if-changed=src_cpp");
     println!("cargo:rerun-if-env-changed=VULKAN_SDK");
     println!("cargo:rerun-if-env-changed=GPCK_DXC_PATH");

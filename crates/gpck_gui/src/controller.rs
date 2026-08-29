@@ -261,6 +261,7 @@ impl GuiController {
                 // MiniDXNN Options Bridge
                 ui.set_ntc_enabled(opts.ntc.enabled);
                 ui.set_ntc_target_bpp(opts.ntc.target_bpp);
+                ui.set_ntc_grid_res_index(opts.ntc.grid_res_index);
                 ui.set_ntc_auto_bundle(opts.ntc.auto_bundle_pbr);
                 ui.set_ntc_precompute_bc7_modes(opts.ntc.precompute_bc7_modes);
                 ui.set_ntc_wave_reduced_accum(opts.ntc.stable_training);
@@ -596,16 +597,14 @@ impl GuiController {
                 let max_tail_idx = ui.get_max_tail_res_index();
                 let key_str = ui.get_encryption_key().to_string();
 
-                // MiniDXNN Options Bridge with exact grid resolution mapping
+                // MiniDXNN Options Bridge with relative resolution selection
                 let ntc_enabled = ui.get_ntc_enabled();
                 let ntc_grid_res_idx = ui.get_ntc_grid_res_index();
                 let ntc_bpp = match ntc_grid_res_idx {
-                    0 => 5.0,  // Grid 64x64
-                    1 => 8.0,  // Grid 128x128
-                    2 => 12.0, // Grid 256x256 (High Quality)
-                    3 => 16.0, // Grid 512x512 (Ultra 4K Crisp)
-                    4 => 20.0, // Grid 1024x1024 (Extreme 4K Native)
-                    _ => ui.get_ntc_target_bpp().max(1.5),
+                    1 => 12.0, // Ultra (1/2 size)
+                    2 => 3.5,  // Balanced (1/8 size)
+                    3 => 2.0,  // Aggressive (1/16 size)
+                    _ => 6.0,  // High Quality (1/4 size - Default index 0)
                 };
 
                 let ntc_quality_idx = ui.get_ntc_quality_index();
@@ -732,6 +731,7 @@ impl GuiController {
                         ntc: NtcPackerOptions {
                             enabled: ntc_enabled,
                             target_bpp: ntc_bpp,
+                            grid_res_index: ntc_grid_res_idx,
                             training_steps: ntc_training_steps,
                             auto_bundle_pbr: ntc_auto_bundle,
                             precompute_bc7_modes: ntc_precompute_bc7,

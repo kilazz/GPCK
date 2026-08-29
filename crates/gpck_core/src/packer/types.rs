@@ -265,17 +265,15 @@ impl Default for PbrSuffixConfig {
     fn default() -> Self {
         Self {
             albedo: vec![
-                "_diff".into(),
                 "_albedo".into(),
                 "_basecolor".into(),
+                "_diff".into(),
                 "_color".into(),
                 "_col".into(),
                 "_d".into(),
                 "_alb".into(),
             ],
             normal: vec![
-                "_ddn".into(),
-                "_ddna".into(),
                 "_normal".into(),
                 "_norm".into(),
                 "_nrm".into(),
@@ -283,20 +281,20 @@ impl Default for PbrSuffixConfig {
                 "_nor".into(),
             ],
             metallic: vec![
-                "_spec".into(),
-                "_specular".into(),
                 "_metal".into(),
                 "_metallic".into(),
                 "_metalness".into(),
                 "_m".into(),
                 "_met".into(),
+                "_specular".into(),
+                "_spec".into(),
             ],
             roughness: vec![
-                "_gloss".into(),
                 "_rough".into(),
                 "_roughness".into(),
-                "_r".into(),
                 "_rgh".into(),
+                "_r".into(),
+                "_gloss".into(),
             ],
             ao: vec![
                 "_ao".into(),
@@ -305,8 +303,8 @@ impl Default for PbrSuffixConfig {
                 "_ambientocclusion".into(),
             ],
             displacement: vec![
-                "_displ".into(),
                 "_disp".into(),
+                "_displ".into(),
                 "_height".into(),
                 "_h".into(),
                 "_bump".into(),
@@ -319,6 +317,7 @@ impl Default for PbrSuffixConfig {
 pub struct NtcPackerOptions {
     pub enabled: bool,
     pub target_bpp: f32,
+    pub grid_res_index: i32,
     pub training_steps: i32,
     pub auto_bundle_pbr: bool,
     pub precompute_bc7_modes: bool,
@@ -330,7 +329,8 @@ impl Default for NtcPackerOptions {
     fn default() -> Self {
         Self {
             enabled: false,
-            target_bpp: 5.0,
+            target_bpp: 6.0,
+            grid_res_index: 0,
             training_steps: 10000,
             auto_bundle_pbr: true,
             precompute_bc7_modes: true,

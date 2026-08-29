@@ -20,7 +20,8 @@ pub fn detect_entry_point(path: &Path) -> &'static str {
 }
 
 pub fn compile_spirv_and_generate_registry(env: &SdkEnvironment, target_shaders_dir: &Path) {
-    let shaders_dir = env.manifest_dir.join("shaders");
+    let shaders_dir =
+        resolve_external_path(env, "shaders").unwrap_or_else(|| env.workspace_root.join("shaders"));
     let mut compiled_shaders = Vec::new();
 
     let zstdgpu_root = resolve_external_path(env, "external/DirectStorage/zstd/zstdgpu");
@@ -29,12 +30,13 @@ pub fn compile_spirv_and_generate_registry(env: &SdkEnvironment, target_shaders_
     let thirdparty_dir = resolve_external_path(env, "external/DirectStorage/zstd/ThirdParty");
     let platform_dir = resolve_external_path(env, "external/DirectStorage/zstd/platform");
     let local_include = env.manifest_dir.join("src_cpp/include");
-    let local_zstd_shaders = env.manifest_dir.join("shaders/ZSTD");
-    let local_brotli_shaders = env.manifest_dir.join("shaders/BrotliG");
-    let local_gacl_shaders = env.manifest_dir.join("shaders/GACL");
-    let local_gdeflate_shaders = env.manifest_dir.join("shaders/GDeflate");
-    let local_geometry_shaders = env.manifest_dir.join("shaders/Geometry");
-    let local_ntc_shaders = env.manifest_dir.join("shaders/NTC");
+    let global_include = resolve_external_path(env, "include");
+    let local_zstd_shaders = shaders_dir.join("ZSTD");
+    let local_brotli_shaders = shaders_dir.join("BrotliG");
+    let local_gacl_shaders = shaders_dir.join("GACL");
+    let local_gdeflate_shaders = shaders_dir.join("GDeflate");
+    let local_geometry_shaders = shaders_dir.join("Geometry");
+    let local_ntc_shaders = shaders_dir.join("NTC");
 
     if shaders_dir.exists() {
         let mut hlsl_files = Vec::new();
@@ -93,6 +95,9 @@ pub fn compile_spirv_and_generate_registry(env: &SdkEnvironment, target_shaders_
                 .arg("-I")
                 .arg(&local_ntc_shaders);
 
+            if let Some(ref g_inc) = global_include {
+                cmd.arg("-I").arg(g_inc);
+            }
             if let Some(ref zroot) = zstdgpu_root {
                 cmd.arg("-I").arg(zroot);
                 cmd.arg("-I").arg(zroot.join("Shaders"));
@@ -172,7 +177,8 @@ pub fn compile_spirv_and_generate_registry(env: &SdkEnvironment, target_shaders_
 }
 
 pub fn compile_dxil_and_generate_registry(env: &SdkEnvironment, target_shaders_dir: &Path) {
-    let shaders_dir = env.manifest_dir.join("shaders");
+    let shaders_dir =
+        resolve_external_path(env, "shaders").unwrap_or_else(|| env.workspace_root.join("shaders"));
     let mut compiled_dxil_shaders = Vec::new();
 
     let zstdgpu_root = resolve_external_path(env, "external/DirectStorage/zstd/zstdgpu");
@@ -181,12 +187,13 @@ pub fn compile_dxil_and_generate_registry(env: &SdkEnvironment, target_shaders_d
     let thirdparty_dir = resolve_external_path(env, "external/DirectStorage/zstd/ThirdParty");
     let platform_dir = resolve_external_path(env, "external/DirectStorage/zstd/platform");
     let local_include = env.manifest_dir.join("src_cpp/include");
-    let local_zstd_shaders = env.manifest_dir.join("shaders/ZSTD");
-    let local_brotli_shaders = env.manifest_dir.join("shaders/BrotliG");
-    let local_gacl_shaders = env.manifest_dir.join("shaders/GACL");
-    let local_gdeflate_shaders = env.manifest_dir.join("shaders/GDeflate");
-    let local_geometry_shaders = env.manifest_dir.join("shaders/Geometry");
-    let local_ntc_shaders = env.manifest_dir.join("shaders/NTC");
+    let global_include = resolve_external_path(env, "include");
+    let local_zstd_shaders = shaders_dir.join("ZSTD");
+    let local_brotli_shaders = shaders_dir.join("BrotliG");
+    let local_gacl_shaders = shaders_dir.join("GACL");
+    let local_gdeflate_shaders = shaders_dir.join("GDeflate");
+    let local_geometry_shaders = shaders_dir.join("Geometry");
+    let local_ntc_shaders = shaders_dir.join("NTC");
 
     if shaders_dir.exists() {
         let mut hlsl_files = Vec::new();
@@ -227,6 +234,9 @@ pub fn compile_dxil_and_generate_registry(env: &SdkEnvironment, target_shaders_d
                 .arg("-I")
                 .arg(&local_ntc_shaders);
 
+            if let Some(ref g_inc) = global_include {
+                cmd.arg("-I").arg(g_inc);
+            }
             if let Some(ref zroot) = zstdgpu_root {
                 cmd.arg("-I").arg(zroot);
                 cmd.arg("-I").arg(zroot.join("Shaders"));

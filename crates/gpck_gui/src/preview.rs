@@ -97,12 +97,17 @@ pub fn trigger_async_preview(
                         format!("Quad-View (2x2 Matrix {}x{})", native_w * 2, native_h * 2),
                         format!("Albedo (Base Color {}x{})", native_w, native_h),
                         format!("Normal Map (Tangent {}x{})", native_w, native_h),
-                        format!("ORM Map (Damage/Rough/Metal {}x{})", native_w, native_h),
+                        format!(
+                            "ORM Composite (AO / Rough / Metal {}x{})",
+                            native_w, native_h
+                        ),
+                        format!("Ambient Occlusion Channel ({}x{})", native_w, native_h),
                         format!("Roughness Channel ({}x{})", native_w, native_h),
+                        format!("Metallic Channel ({}x{})", native_w, native_h),
                     ];
 
                     let pixel_buf = match target_mip {
-                        // View 1: Standalone Albedo (Native W x H)
+                        // View 1: Standalone Albedo (Base Color)
                         1 => {
                             let mut buf =
                                 SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
@@ -118,7 +123,7 @@ pub fn trigger_async_preview(
                             );
                             buf
                         }
-                        // View 2: Standalone Normal Map (Native W x H)
+                        // View 2: Standalone Normal Map (Tangent Space)
                         2 => {
                             let mut buf =
                                 SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
@@ -133,7 +138,7 @@ pub fn trigger_async_preview(
                             );
                             buf
                         }
-                        // View 3: Standalone ORM Map (Native W x H)
+                        // View 3: Standalone ORM Composite Map (R=AO, G=Roughness, B=Metallic)
                         3 => {
                             let mut buf =
                                 SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
@@ -148,7 +153,7 @@ pub fn trigger_async_preview(
                             );
                             buf
                         }
-                        // View 4: Standalone Roughness Channel (Native W x H Grayscale)
+                        // View 4: Standalone Ambient Occlusion Channel (Grayscale)
                         4 => {
                             let mut buf =
                                 SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
@@ -156,10 +161,42 @@ pub fn trigger_async_preview(
                             for (src_px, dst_px) in
                                 pbr.orm.chunks_exact(4).zip(dst.chunks_exact_mut(4))
                             {
-                                let r_val = src_px[1]; // Roughness
+                                let ao_val = src_px[0]; // R = AO
+                                dst_px[0] = ao_val;
+                                dst_px[1] = ao_val;
+                                dst_px[2] = ao_val;
+                                dst_px[3] = 255;
+                            }
+                            buf
+                        }
+                        // View 5: Standalone Roughness Channel (Grayscale)
+                        5 => {
+                            let mut buf =
+                                SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+                            for (src_px, dst_px) in
+                                pbr.orm.chunks_exact(4).zip(dst.chunks_exact_mut(4))
+                            {
+                                let r_val = src_px[1]; // G = Roughness
                                 dst_px[0] = r_val;
                                 dst_px[1] = r_val;
                                 dst_px[2] = r_val;
+                                dst_px[3] = 255;
+                            }
+                            buf
+                        }
+                        // View 6: Standalone Metallic Channel (Grayscale)
+                        6 => {
+                            let mut buf =
+                                SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+                            for (src_px, dst_px) in
+                                pbr.orm.chunks_exact(4).zip(dst.chunks_exact_mut(4))
+                            {
+                                let m_val = src_px[2]; // B = Metallic
+                                dst_px[0] = m_val;
+                                dst_px[1] = m_val;
+                                dst_px[2] = m_val;
                                 dst_px[3] = 255;
                             }
                             buf
@@ -202,7 +239,7 @@ pub fn trigger_async_preview(
                                 }
                             }
 
-                            // Dynamic Cyan Grid Dividers
+                            // Cyan Grid Dividers
                             for y in 0..qh as usize {
                                 let idx = (y * q_stride + (nw - 1)) * 4;
                                 dst[idx..idx + 4].copy_from_slice(&[56, 189, 248, 255]);
@@ -478,13 +515,9 @@ pub fn load_texture_to_buffer(
             dxgi_fmt = GaclTransform::from_u32(gacl_fmt).to_dxgi_format();
         } else {
             let name_lower = rel_path.to_lowercase();
-            dxgi_fmt = if name_lower.contains("_ddna")
-                || name_lower.contains("_ddn")
-                || name_lower.contains("_norm")
-            {
+            dxgi_fmt = if name_lower.contains("_normal") || name_lower.contains("_norm") {
                 dxgi::BC5_UNORM
-            } else if name_lower.contains("_gloss")
-                || name_lower.contains("_rough")
+            } else if name_lower.contains("_rough")
                 || name_lower.contains("_height")
                 || name_lower.contains("_disp")
             {
