@@ -13,6 +13,7 @@ use crate::compression::codecs::CompressionMethod;
 use crate::compression::ntc::NtcPbrMaterialBundle;
 use crate::core::error::{GpckError, GpckResult};
 use crate::format::archive::{FLAG_BOOT_TAIL, TAG_BASE_GAME};
+use crate::format::dds::DdsUtils;
 use crossbeam_channel::bounded;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -281,9 +282,6 @@ impl PackingPipeline {
         slot: &PbrMaterialSlot,
         options: &PackerOptions,
     ) -> GpckResult<ProcessedFile> {
-        let width = 2048u32;
-        let height = 2048u32;
-
         let albedo = slot
             .albedo_path
             .as_ref()
@@ -305,6 +303,21 @@ impl PackingPipeline {
             .and_then(|p| std::fs::read(p).ok());
 
         let ao = slot.ao_path.as_ref().and_then(|p| std::fs::read(p).ok());
+
+        // Dynamically extract real texture dimensions from available source DDS headers
+        let mut width = 2048u32;
+        let mut height = 2048u32;
+
+        for bytes in [&albedo, &normal, &metallic, &roughness, &ao]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(h) = DdsUtils::get_header_info(bytes) {
+                width = h.width as u32;
+                height = h.height as u32;
+                break;
+            }
+        }
 
         let mut bundle = NtcPbrMaterialBundle::new(width, height);
         bundle.albedo = albedo;

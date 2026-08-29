@@ -36,6 +36,16 @@ pub fn spawn_gdat_writer(
         while let Ok(mut file) = rx.recv() {
             file.partition_id = current_partition_id;
 
+            let file_aligned = (current_data_ptr + file.alignment - 1) & !(file.alignment - 1);
+            let file_padding = (file_aligned - current_data_ptr) as usize;
+            if file_padding > 0 {
+                gdat_file
+                    .write_all(&vec![0u8; file_padding])
+                    .map_err(GpckError::Io)?;
+                current_data_ptr = file_aligned;
+                current_partition_bytes += file_padding;
+            }
+
             for chunk in &mut file.chunks {
                 if enable_dedup && let Some(&existing_offset) = chunk_offset_map.get(&chunk.hash) {
                     chunk.offset = existing_offset;
@@ -51,21 +61,21 @@ pub fn spawn_gdat_writer(
                     file.partition_id = current_partition_id;
                 }
 
-                let aligned = (current_data_ptr + file.alignment - 1) & !(file.alignment - 1);
-                let padding = (aligned - current_data_ptr) as usize;
-                if padding > 0 {
+                let chunk_aligned = (current_data_ptr + 3) & !3;
+                let chunk_padding = (chunk_aligned - current_data_ptr) as usize;
+                if chunk_padding > 0 {
                     gdat_file
-                        .write_all(&vec![0u8; padding])
+                        .write_all(&vec![0u8; chunk_padding])
                         .map_err(GpckError::Io)?;
                 }
 
                 gdat_file.write_all(&chunk.data).map_err(GpckError::Io)?;
-                chunk.offset = aligned;
-                current_data_ptr = aligned + chunk.data.len() as i64;
-                current_partition_bytes += padding + chunk.data.len();
+                chunk.offset = chunk_aligned;
+                current_data_ptr = chunk_aligned + chunk.data.len() as i64;
+                current_partition_bytes += chunk_padding + chunk.data.len();
 
                 if enable_dedup {
-                    chunk_offset_map.insert(chunk.hash, aligned);
+                    chunk_offset_map.insert(chunk.hash, chunk_aligned);
                 }
 
                 chunk.data.clear();
@@ -76,7 +86,6 @@ pub fn spawn_gdat_writer(
     })
 }
 
-/// Single trial attempt to generate a CHD minimal perfect hash table using a specific master seed.
 fn try_generate_chd_table(
     files: &[ProcessedFile],
     master_seed: u32,
@@ -91,14 +100,12 @@ fn try_generate_chd_table(
     let mut displacements = vec![0i32; num_buckets];
     let mut buckets: Vec<Vec<&ProcessedFile>> = vec![Vec::new(); num_buckets];
 
-    // 1. Distribute keys into buckets using primary hash with master_seed
     for f in files {
         let hash = calculate_primary_hash_with_seed(&f.asset_id, master_seed);
         let bucket_idx = (hash % num_buckets as u64) as usize;
         buckets[bucket_idx].push(f);
     }
 
-    // 2. Sort buckets by size descending (place densest/hardest buckets first)
     let mut bucket_order: Vec<usize> = (0..num_buckets).collect();
     bucket_order.sort_by(|&a, &b| buckets[b].len().cmp(&buckets[a].len()));
 
@@ -123,14 +130,12 @@ fn try_generate_chd_table(
         };
     };
 
-    // 3. Find displacement seed d for each bucket
     for b_idx in bucket_order {
         let bucket = &buckets[b_idx];
         if bucket.is_empty() {
             continue;
         }
 
-        // Single-element bucket: map directly to first available free slot via negative index
         if bucket.len() == 1 {
             let f = bucket[0];
             if let Some(free_slot) = occupied.iter().position(|&occ| !occ) {
@@ -141,7 +146,6 @@ fn try_generate_chd_table(
             continue;
         }
 
-        // Multi-element bucket: search for collision-free positive displacement d >= 1
         let mut d = 1u32;
         let mut slots = Vec::with_capacity(bucket.len());
         let mut found = false;
@@ -174,7 +178,6 @@ fn try_generate_chd_table(
             d += 1;
         }
 
-        // If a single bucket cannot be placed within search bounds, abort this trial
         if !found {
             return None;
         }
@@ -183,31 +186,21 @@ fn try_generate_chd_table(
     Some((hash_table, displacements))
 }
 
-/// Industrial CHD Minimal Perfect Hashing Algorithm with Master-Seed Rehashing.
-/// Guarantees strict O(1) collision-free lookups for 100k - 2M+ assets with 100% convergence.
 pub fn generate_chd_perfect_hash_table(files: &[ProcessedFile]) -> (Vec<FileEntry>, Vec<i32>, u32) {
     let num_keys = files.len();
     if num_keys == 0 {
         return (Vec::new(), Vec::new(), 0);
     }
 
-    // Attempt generation across incremented master seeds
     for trial in 0..MAX_MASTER_SEED_TRIALS {
         let master_seed = trial;
         if let Some((hash_table, displacements)) =
             try_generate_chd_table(files, master_seed, MAX_PER_BUCKET_DISPLACEMENT_SEARCH)
         {
-            if trial > 0 {
-                crate::core::logger::log_info(&format!(
-                    "[CHD] Perfect hash table generated successfully on master seed trial {}",
-                    trial
-                ));
-            }
             return (hash_table, displacements, master_seed);
         }
     }
 
-    // High-effort fallback trial with prime master seed and expanded search limit
     let fallback_master_seed = 0x9E3779B9u32;
     if let Some((hash_table, displacements)) =
         try_generate_chd_table(files, fallback_master_seed, 500_000)
@@ -290,7 +283,6 @@ pub fn write_master_toc(
     }
     let name_table_size = gtoc.stream_position().map_err(GpckError::Io)? as i64 - name_table_start;
 
-    // Generate CHD Minimal Perfect Hash Table with Master-Seed Rehashing
     let (mut hash_table, displacements, master_seed) = generate_chd_perfect_hash_table(files);
 
     for entry in &mut hash_table {
@@ -301,7 +293,6 @@ pub fn write_master_toc(
         }
     }
 
-    // Align TOC to 64 bytes for direct SIMD/vmovdqa loading
     let current_pos = gtoc.stream_position().map_err(GpckError::Io)?;
     let aligned_pos = (current_pos + 63) & !63;
     let pad = (aligned_pos - current_pos) as usize;

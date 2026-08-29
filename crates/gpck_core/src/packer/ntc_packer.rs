@@ -129,8 +129,8 @@ impl NtcBundlePacker {
         }
     }
 
-    /// Samples normalized PBR targets [0.0 .. 1.0] from available textures at (u, v).
-    /// Pure industry standard PBR: Albedo RGB, Normal XY, Occlusion (AO), Roughness, Metallic.
+    /// Samples normalized PBR targets from available textures at (u, v).
+    /// Stores true normalized normal components directly in [-1.0 .. 1.0].
     #[allow(clippy::too_many_arguments)]
     fn sample_pbr_targets(
         albedo: Option<&(Vec<u8>, usize, usize)>,
@@ -147,21 +147,28 @@ impl NtcBundlePacker {
         let met = Self::sample_sharp(metal, u, v, [0, 0, 0, 255]);
         let ao_val = Self::sample_sharp(ao, u, v, [255, 255, 255, 255]);
 
-        let nx_raw = nrm[0] as f32 / 255.0;
-        let ny_raw = nrm[1] as f32 / 255.0;
+        let mut nx = (nrm[0] as f32 / 255.0) * 2.0 - 1.0;
+        let mut ny = (nrm[1] as f32 / 255.0) * 2.0 - 1.0;
+
+        let len_xy = (nx * nx + ny * ny).sqrt();
+        if len_xy > 1.0 {
+            nx /= len_xy;
+            ny /= len_xy;
+        }
+
         let final_ao = ao_val[0] as f32 / 255.0;
         let final_rough = rgh[0] as f32 / 255.0;
         let final_metal = met[0] as f32 / 255.0;
 
         [
-            alb[0] as f32 / 255.0, // 0: Albedo R
-            alb[1] as f32 / 255.0, // 1: Albedo G
-            alb[2] as f32 / 255.0, // 2: Albedo B
-            nx_raw,                // 3: Normal X
-            ny_raw,                // 4: Normal Y
-            final_ao,              // 5: Occlusion (AO -> ORM.R)
-            final_rough,           // 6: Roughness (-> ORM.G)
-            final_metal,           // 7: Metallic (-> ORM.B)
+            alb[0] as f32 / 255.0, // 0: Albedo R [0..1]
+            alb[1] as f32 / 255.0, // 1: Albedo G [0..1]
+            alb[2] as f32 / 255.0, // 2: Albedo B [0..1]
+            nx,                    // 3: Normal X  [-1..1]
+            ny,                    // 4: Normal Y  [-1..1]
+            final_ao,              // 5: Occlusion (AO -> ORM.R) [0..1]
+            final_rough,           // 6: Roughness (-> ORM.G)     [0..1]
+            final_metal,           // 7: Metallic (-> ORM.B)      [0..1]
         ]
     }
 
@@ -231,9 +238,16 @@ impl NtcBundlePacker {
                     u,
                     v,
                 );
-                for ch in 0..c {
-                    grid[(gy * r + gx) * c + ch] = targets[ch] * 2.0 - 1.0;
-                }
+
+                let base_idx = (gy * r + gx) * c;
+                grid[base_idx] = targets[0] * 2.0 - 1.0;
+                grid[base_idx + 1] = targets[1] * 2.0 - 1.0;
+                grid[base_idx + 2] = targets[2] * 2.0 - 1.0;
+                grid[base_idx + 3] = targets[3].clamp(-1.0, 1.0);
+                grid[base_idx + 4] = targets[4].clamp(-1.0, 1.0);
+                grid[base_idx + 5] = targets[5] * 2.0 - 1.0;
+                grid[base_idx + 6] = targets[6] * 2.0 - 1.0;
+                grid[base_idx + 7] = targets[7] * 2.0 - 1.0;
             }
         }
 

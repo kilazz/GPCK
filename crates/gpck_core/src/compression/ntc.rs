@@ -167,43 +167,36 @@ impl NtcContext {
                     *item = val;
                 }
 
-                // High-Frequency Neural PBR Targets [-1.0 .. 1.0] -> [0.0 .. 1.0]
-                let out_pbr = [
-                    (feat[0] * 0.5 + 0.5).clamp(0.0, 1.0), // 0: Albedo R
-                    (feat[1] * 0.5 + 0.5).clamp(0.0, 1.0), // 1: Albedo G
-                    (feat[2] * 0.5 + 0.5).clamp(0.0, 1.0), // 2: Albedo B
-                    (feat[3] * 0.5 + 0.5).clamp(0.0, 1.0), // 3: Normal X
-                    (feat[4] * 0.5 + 0.5).clamp(0.0, 1.0), // 4: Normal Y
-                    (feat[5] * 0.5 + 0.5).clamp(0.0, 1.0), // 5: Ambient Occlusion (AO)
-                    (feat[6] * 0.5 + 0.5).clamp(0.0, 1.0), // 6: Roughness
-                    (feat[7] * 0.5 + 0.5).clamp(0.0, 1.0), // 7: Metallic
-                ];
-
-                // 1. Albedo (Base Color)
-                alb_px[0] = (out_pbr[0] * 255.0).round() as u8;
-                alb_px[1] = (out_pbr[1] * 255.0).round() as u8;
-                alb_px[2] = (out_pbr[2] * 255.0).round() as u8;
+                // Albedo (Base Color)
+                alb_px[0] = ((feat[0] * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8;
+                alb_px[1] = ((feat[1] * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8;
+                alb_px[2] = ((feat[2] * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8;
                 alb_px[3] = 255;
 
-                // 2. Tangent Normal Map (Accurate Nx, Ny, Nz reconstruction)
-                let nx = out_pbr[3] * 2.0 - 1.0;
-                let ny = out_pbr[4] * 2.0 - 1.0;
-                let nz = (1.0f32 - nx * nx - ny * ny).max(0.001).sqrt();
-                let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+                // Tangent Normal Map (Accurate reconstruction without Catmull-Rom overshoot ringing)
+                let nx = feat[3].clamp(-1.0, 1.0);
+                let ny = feat[4].clamp(-1.0, 1.0);
+                let nz_sq = (1.0f32 - nx * nx - ny * ny).max(0.0);
+                let nz = nz_sq.sqrt();
 
+                let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
                 let nx_u = nx / len;
                 let ny_u = ny / len;
                 let nz_u = nz / len;
 
-                nrm_px[0] = ((nx_u * 0.5 + 0.5) * 255.0).round() as u8;
-                nrm_px[1] = ((ny_u * 0.5 + 0.5) * 255.0).round() as u8;
-                nrm_px[2] = ((nz_u * 0.5 + 0.5) * 255.0).round() as u8;
+                nrm_px[0] = ((nx_u * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+                nrm_px[1] = ((ny_u * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
+                nrm_px[2] = ((nz_u * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8;
                 nrm_px[3] = 255;
 
-                // 3. Strict Industry Standard ORM: R = AO, G = Roughness, B = Metallic
-                orm_px[0] = (out_pbr[5] * 255.0).round() as u8; // R = Ambient Occlusion
-                orm_px[1] = (out_pbr[6] * 255.0).round() as u8; // G = Roughness
-                orm_px[2] = (out_pbr[7] * 255.0).round() as u8; // B = Metallic
+                // Strict Industry Standard ORM: R = AO, G = Roughness, B = Metallic
+                let ao_val = (feat[5] * 0.5 + 0.5).clamp(0.0, 1.0);
+                let rough_val = (feat[6] * 0.5 + 0.5).clamp(0.0, 1.0);
+                let metal_val = (feat[7] * 0.5 + 0.5).clamp(0.0, 1.0);
+
+                orm_px[0] = (ao_val * 255.0).round().clamp(0.0, 255.0) as u8; // R = Ambient Occlusion
+                orm_px[1] = (rough_val * 255.0).round().clamp(0.0, 255.0) as u8; // G = Roughness
+                orm_px[2] = (metal_val * 255.0).round().clamp(0.0, 255.0) as u8; // B = Metallic
                 orm_px[3] = 255;
             });
 
