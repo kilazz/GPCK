@@ -1,487 +1,158 @@
 // include/gpck.hpp
-/**
- * @file gpck.hpp
- * @brief Modern C++17/C++20 RAII Smart Pointers & Zero-Overhead SDK for GPCK.
- *
- * SPDX-License-Identifier: MIT OR Apache-2.0
- */
-
 #pragma once
 
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
-#include <string_view>
-#include <utility>
 #include <vector>
 
 #include "gpck_vfs.h"
 
 namespace gpck {
 
-/**
- * @brief Priority levels for DirectStorage GPU queues.
- */
-enum class Priority : int32_t
+inline bool is_directstorage_supported()
 {
-    Low = GPCK_PRIORITY_LOW,
-    Normal = GPCK_PRIORITY_NORMAL,
-    High = GPCK_PRIORITY_HIGH
-};
-
-/**
- * @brief Converts GPCK C-API error codes into human-readable strings.
- */
-inline const char* error_to_string(int32_t code) noexcept
-{
-    switch (code) {
-    case GPCK_OK:
-        return "GPCK_OK: Operation completed successfully.";
-    case GPCK_ERR_NULL_PTR:
-        return "GPCK_ERR_NULL_PTR: Null pointer argument provided.";
-    case GPCK_ERR_INVALID_PATH:
-        return "GPCK_ERR_INVALID_PATH: Invalid virtual file path.";
-    case GPCK_ERR_NOT_FOUND:
-        return "GPCK_ERR_NOT_FOUND: Asset or file not found.";
-    case GPCK_ERR_BUFFER_TOO_SMALL:
-        return "GPCK_ERR_BUFFER_TOO_SMALL: Destination buffer too small.";
-    case GPCK_ERR_DECRYPTION_FAILED:
-        return "GPCK_ERR_DECRYPTION_FAILED: Invalid passphrase or corrupted payload.";
-    case GPCK_ERR_IO_FAILED:
-        return "GPCK_ERR_IO_FAILED: Low-level file or memory I/O failed.";
-    case GPCK_ERR_NOT_UNCOMPRESSED:
-        return "GPCK_ERR_NOT_UNCOMPRESSED: Asset is compressed or chunked; zero-copy unavailable.";
-    case GPCK_ERR_DIRECTSTORAGE_UNSUPPORTED:
-        return "GPCK_ERR_DIRECTSTORAGE_UNSUPPORTED: DirectStorage 1.4 unavailable on host.";
-    default:
-        return "UNKNOWN_ERROR: Unrecognized error code.";
-    }
+    return gpck_directstorage_is_supported() != 0;
 }
 
-/**
- * @brief Exception thrown on fatal GPCK operations when using throwing API overloads.
- */
-class Exception : public std::runtime_error
-{
-public:
-    explicit Exception(int32_t code, const std::string& msg = "")
-        : std::runtime_error(msg.empty() ? error_to_string(code) : (msg + ": " + error_to_string(code))), m_code(code)
-    {
-    }
-
-    [[nodiscard]] int32_t code() const noexcept { return m_code; }
-
-private:
-    int32_t m_code;
-};
-
-/* Custom Deleters for std::unique_ptr */
-struct VfsDeleter
-{
-    void operator()(GpckVfs* p) const noexcept
-    {
-        if (p)
-            gpck_vfs_destroy(p);
-    }
-};
-
-struct ArchiveDeleter
-{
-    void operator()(GpckArchive* p) const noexcept
-    {
-        if (p)
-            gpck_archive_release(p);
-    }
-};
-
-struct AssetSliceDeleter
-{
-    void operator()(GpckAssetSlice* p) const noexcept
-    {
-        if (p)
-            gpck_asset_slice_release(p);
-    }
-};
-
-using VfsRawPtr = std::unique_ptr<GpckVfs, VfsDeleter>;
-using ArchiveRawPtr = std::unique_ptr<GpckArchive, ArchiveDeleter>;
-using AssetSliceRawPtr = std::unique_ptr<GpckAssetSlice, AssetSliceDeleter>;
-
-/**
- * @brief Safe RAII Zero-Copy Asset Slice.
- *
- * Holds an internal reference count on the owning archive memory map,
- * guaranteeing zero data races and complete lifetime safety.
- */
 class AssetSlice
 {
 public:
-    AssetSlice() noexcept = default;
-
-    explicit AssetSlice(GpckAssetSlice* raw) noexcept : m_handle(raw) { update_pointers(); }
-
-    AssetSlice(AssetSlice&& other) noexcept
-        : m_handle(std::move(other.m_handle)), m_data(other.m_data), m_size(other.m_size)
+    explicit AssetSlice(GpckAssetSlice* slice) : m_slice(slice) {}
+    ~AssetSlice()
     {
-        other.m_data = nullptr;
-        other.m_size = 0;
-    }
-
-    AssetSlice& operator=(AssetSlice&& other) noexcept
-    {
-        if (this != &other) {
-            m_handle = std::move(other.m_handle);
-            m_data = other.m_data;
-            m_size = other.m_size;
-            other.m_data = nullptr;
-            other.m_size = 0;
+        if (m_slice) {
+            gpck_asset_slice_release(m_slice);
         }
-        return *this;
     }
-
     AssetSlice(const AssetSlice&) = delete;
     AssetSlice& operator=(const AssetSlice&) = delete;
+    AssetSlice(AssetSlice&& other) noexcept : m_slice(other.m_slice) { other.m_slice = nullptr; }
 
-    [[nodiscard]] bool valid() const noexcept { return m_handle != nullptr && m_data != nullptr; }
-    [[nodiscard]] explicit operator bool() const noexcept { return valid(); }
-
-    [[nodiscard]] const uint8_t* data() const noexcept { return m_data; }
-    [[nodiscard]] size_t size() const noexcept { return m_size; }
-    [[nodiscard]] bool empty() const noexcept { return m_size == 0; }
-
-    [[nodiscard]] std::string_view string_view() const noexcept
+    const uint8_t* data() const
     {
-        return {reinterpret_cast<const char*>(m_data), m_size};
-    }
-
-    [[nodiscard]] GpckAssetSlice* get() const noexcept { return m_handle.get(); }
-
-    void reset() noexcept
-    {
-        m_handle.reset();
-        m_data = nullptr;
-        m_size = 0;
-    }
-
-private:
-    void update_pointers() noexcept
-    {
-        if (m_handle) {
-            gpck_asset_slice_get_data(m_handle.get(), &m_data, &m_size);
-        } else {
-            m_data = nullptr;
-            m_size = 0;
+        const uint8_t* ptr = nullptr;
+        size_t sz = 0;
+        if (m_slice && gpck_asset_slice_get_data(m_slice, &ptr, &sz) == GPCK_OK) {
+            return ptr;
         }
+        return nullptr;
     }
 
-    AssetSliceRawPtr m_handle{nullptr};
-    const uint8_t* m_data{nullptr};
-    size_t m_size{0};
-};
-
-/**
- * @brief RAII GPCK Archive Package Controller.
- */
-class Archive
-{
-public:
-    Archive() noexcept = default;
-
-    explicit Archive(GpckArchive* raw) noexcept : m_handle(raw) {}
-
-    Archive(Archive&&) noexcept = default;
-    Archive& operator=(Archive&&) noexcept = default;
-
-    Archive(const Archive& other) noexcept
+    size_t size() const
     {
-        if (other.m_handle) {
-            gpck_archive_retain(other.m_handle.get());
-            m_handle.reset(other.m_handle.get());
-        }
-    }
-
-    Archive& operator=(const Archive& other) noexcept
-    {
-        if (this != &other) {
-            if (other.m_handle) {
-                gpck_archive_retain(other.m_handle.get());
-                m_handle.reset(other.m_handle.get());
-            } else {
-                m_handle.reset();
-            }
-        }
-        return *this;
-    }
-
-    /**
-     * @brief Opens an archive from disk.
-     */
-    static std::optional<Archive> open(std::string_view path, const char* passphrase = nullptr) noexcept
-    {
-        GpckArchive* raw = nullptr;
-        std::string null_terminated_path(path);
-        if (gpck_archive_open(null_terminated_path.c_str(), passphrase, &raw) == GPCK_OK && raw) {
-            return Archive(raw);
-        }
-        return std::nullopt;
-    }
-
-    /**
-     * @brief Opens an archive or throws an Exception on failure.
-     */
-    static Archive open_or_throw(std::string_view path, const char* passphrase = nullptr)
-    {
-        GpckArchive* raw = nullptr;
-        std::string null_terminated_path(path);
-        int32_t res = gpck_archive_open(null_terminated_path.c_str(), passphrase, &raw);
-        if (res != GPCK_OK || !raw) {
-            throw Exception(res, "Failed to open archive: " + null_terminated_path);
-        }
-        return Archive(raw);
-    }
-
-    [[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
-    [[nodiscard]] explicit operator bool() const noexcept { return valid(); }
-    [[nodiscard]] GpckArchive* get() const noexcept { return m_handle.get(); }
-
-    [[nodiscard]] uint32_t entry_count() const noexcept
-    {
-        uint32_t count = 0;
-        if (m_handle && gpck_archive_get_entry_count(m_handle.get(), &count) == GPCK_OK) {
-            return count;
+        const uint8_t* ptr = nullptr;
+        size_t sz = 0;
+        if (m_slice && gpck_asset_slice_get_data(m_slice, &ptr, &sz) == GPCK_OK) {
+            return sz;
         }
         return 0;
     }
 
-    /**
-     * @brief Acquires an RAII zero-copy memory-mapped slice (< 0.1 us).
-     */
-    [[nodiscard]] std::optional<AssetSlice> acquire_slice(std::string_view virtual_path) const noexcept
+private:
+    GpckAssetSlice* m_slice = nullptr;
+};
+
+class Archive
+{
+public:
+    static std::shared_ptr<Archive> open(const std::string& path, const std::string& passphrase = "")
     {
-        if (!m_handle)
-            return std::nullopt;
+        GpckArchive* raw = nullptr;
+        int32_t res = gpck_archive_open(path.c_str(), passphrase.empty() ? nullptr : passphrase.c_str(), &raw);
+        if (res == GPCK_OK && raw) {
+            return std::make_shared<Archive>(raw);
+        }
+        return nullptr;
+    }
+
+    explicit Archive(GpckArchive* raw) : m_archive(raw) {}
+    ~Archive()
+    {
+        if (m_archive) {
+            gpck_archive_release(m_archive);
+        }
+    }
+
+    uint32_t entry_count() const
+    {
+        uint32_t count = 0;
+        gpck_archive_get_entry_count(m_archive, &count);
+        return count;
+    }
+
+    // Zero-Copy Slice (< 0.1 us)
+    std::unique_ptr<AssetSlice> acquire_slice(const std::string& virtual_path) const
+    {
         GpckAssetSlice* raw_slice = nullptr;
-        std::string path_str(virtual_path);
-        if (gpck_archive_acquire_asset_slice(m_handle.get(), path_str.c_str(), &raw_slice) == GPCK_OK && raw_slice) {
-            return AssetSlice(raw_slice);
+        if (gpck_archive_acquire_asset_slice(m_archive, virtual_path.c_str(), &raw_slice) == GPCK_OK && raw_slice) {
+            return std::make_unique<AssetSlice>(raw_slice);
         }
-        return std::nullopt;
+        return nullptr;
     }
 
-    /**
-     * @brief Decompresses an asset into a pre-allocated memory buffer.
-     */
-    int32_t read_asset_to_buffer(std::string_view virtual_path, uint8_t* out_buf, size_t max_buf_len,
-                                 size_t* out_written = nullptr) const noexcept
+    // Zero-Allocation Linear Arena Read (directly into preallocated memory)
+    int32_t read_asset_to_buffer(const std::string& virtual_path, uint8_t* dest_buf, size_t dest_capacity,
+                                 size_t* out_written)
     {
-        if (!m_handle)
-            return GPCK_ERR_NULL_PTR;
-        size_t written = 0;
-        std::string path_str(virtual_path);
-        int32_t res = gpck_archive_read_asset_by_path(m_handle.get(), path_str.c_str(), out_buf, max_buf_len, &written);
-        if (out_written)
-            *out_written = written;
-        return res;
-    }
-
-    /**
-     * @brief Decompresses an asset and returns an allocated byte vector.
-     */
-    [[nodiscard]] std::optional<std::vector<uint8_t>> read_asset(std::string_view virtual_path) const
-    {
-        if (!m_handle)
-            return std::nullopt;
-        std::string path_str(virtual_path);
-
-        size_t required_size = 0;
-        int32_t res = gpck_archive_read_asset_by_path(m_handle.get(), path_str.c_str(), nullptr, 0, &required_size);
-
-        if (res != GPCK_OK || required_size == 0)
-            return std::nullopt;
-
-        std::vector<uint8_t> buffer(required_size);
-        size_t written = 0;
-        res = gpck_archive_read_asset_by_path(m_handle.get(), path_str.c_str(), buffer.data(), buffer.size(), &written);
-
-        if (res == GPCK_OK) {
-            buffer.resize(written);
-            return buffer;
-        }
-        return std::nullopt;
+        return gpck_archive_read_asset_to_buffer(m_archive, virtual_path.c_str(), dest_buf, dest_capacity, out_written);
     }
 
 private:
-    ArchiveRawPtr m_handle{nullptr};
+    GpckArchive* m_archive = nullptr;
 };
 
-/**
- * @brief RAII Virtual File System (VFS) Controller.
- */
 class Vfs
 {
 public:
-    Vfs() noexcept = default;
-
-    explicit Vfs(GpckVfs* raw) noexcept : m_handle(raw) {}
-
-    Vfs(Vfs&&) noexcept = default;
-    Vfs& operator=(Vfs&&) noexcept = default;
-
-    Vfs(const Vfs&) = delete;
-    Vfs& operator=(const Vfs&) = delete;
-
-    /**
-     * @brief Creates a new VFS instance.
-     */
-    static std::optional<Vfs> create() noexcept
+    static std::unique_ptr<Vfs> create()
     {
         GpckVfs* raw = nullptr;
         if (gpck_vfs_create(&raw) == GPCK_OK && raw) {
-            return Vfs(raw);
+            return std::make_unique<Vfs>(raw);
         }
-        return std::nullopt;
+        return nullptr;
     }
 
-    [[nodiscard]] bool valid() const noexcept { return m_handle != nullptr; }
-    [[nodiscard]] explicit operator bool() const noexcept { return valid(); }
-    [[nodiscard]] GpckVfs* get() const noexcept { return m_handle.get(); }
-
-    /**
-     * @brief Mounts an archive file (.gtoc) into the VFS search space.
-     */
-    bool mount_archive(std::string_view path) noexcept
+    explicit Vfs(GpckVfs* raw) : m_vfs(raw) {}
+    ~Vfs()
     {
-        if (!m_handle)
-            return false;
-        std::string path_str(path);
-        return gpck_vfs_mount_archive(m_handle.get(), path_str.c_str()) == GPCK_OK;
-    }
-
-    /**
-     * @brief Mounts a loose directory into the VFS search space.
-     */
-    bool mount_directory(std::string_view path) noexcept
-    {
-        if (!m_handle)
-            return false;
-        std::string path_str(path);
-        return gpck_vfs_mount_directory(m_handle.get(), path_str.c_str()) == GPCK_OK;
-    }
-
-    /**
-     * @brief Reads a file through the VFS into a byte vector.
-     */
-    [[nodiscard]] std::optional<std::vector<uint8_t>> read_file(std::string_view virtual_path) const
-    {
-        if (!m_handle)
-            return std::nullopt;
-        std::string path_str(virtual_path);
-
-        size_t required_size = 0;
-        int32_t res = gpck_vfs_read_file(m_handle.get(), path_str.c_str(), nullptr, 0, &required_size);
-
-        if (res != GPCK_OK || required_size == 0)
-            return std::nullopt;
-
-        std::vector<uint8_t> buffer(required_size);
-        size_t written = 0;
-        res = gpck_vfs_read_file(m_handle.get(), path_str.c_str(), buffer.data(), buffer.size(), &written);
-
-        if (res == GPCK_OK) {
-            buffer.resize(written);
-            return buffer;
+        if (m_vfs) {
+            gpck_vfs_destroy(m_vfs);
         }
-        return std::nullopt;
     }
 
-    /**
-     * @brief Reads a text file through the VFS as a std::string.
-     */
-    [[nodiscard]] std::optional<std::string> read_text(std::string_view virtual_path) const
+    bool mount_archive(const std::string& path) { return gpck_vfs_mount_archive(m_vfs, path.c_str()) == GPCK_OK; }
+
+    bool mount_directory(const std::string& path) { return gpck_vfs_mount_directory(m_vfs, path.c_str()) == GPCK_OK; }
+
+    // Preemption: Cancel stale streaming requests upon fast camera turns
+    void cancel_requests_by_tag(int32_t priority, uint64_t mask, uint64_t tag_value)
     {
-        auto bytes = read_file(virtual_path);
-        if (bytes) {
-            return std::string(reinterpret_cast<const char*>(bytes->data()), bytes->size());
-        }
-        return std::nullopt;
+        gpck_vfs_cancel_requests_by_tag(m_vfs, priority, mask, tag_value);
     }
 
-    /**
-     * @brief DirectStorage: Streams an asset directly to a D3D12 GPU Buffer.
-     */
-    [[nodiscard]] std::optional<uint64_t> stream_to_d3d12_buffer(std::string_view virtual_path, void* d3d12_resource,
-                                                                 uint64_t dest_offset = 0,
-                                                                 Priority priority = Priority::Normal) const noexcept
+    // Sampler Feedback Tile Dispatch Bridge
+    uint32_t process_sampler_feedback(const std::string& virtual_path, const uint8_t* feedback_data,
+                                      uint32_t feedback_size, void* d3d12_tex_ptr, int32_t priority,
+                                      uint64_t camera_tag)
     {
-        if (!m_handle)
-            return std::nullopt;
-        uint64_t fence_val = 0;
-        std::string path_str(virtual_path);
-        int32_t res = gpck_vfs_stream_file_to_d3d12_buffer(m_handle.get(), path_str.c_str(), d3d12_resource,
-                                                           dest_offset, static_cast<int32_t>(priority), &fence_val);
-        if (res == GPCK_OK)
-            return fence_val;
-        return std::nullopt;
+        uint32_t dispatched = 0;
+        gpck_vfs_process_sampler_feedback_map(m_vfs, virtual_path.c_str(), feedback_data, feedback_size, d3d12_tex_ptr,
+                                              priority, camera_tag, &dispatched);
+        return dispatched;
     }
 
-    /**
-     * @brief DirectStorage: Streams a texture directly to a D3D12 Texture2D Resource.
-     */
-    [[nodiscard]] std::optional<uint64_t> stream_to_d3d12_texture(std::string_view virtual_path, void* d3d12_texture,
-                                                                  uint32_t first_subresource = 0,
-                                                                  Priority priority = Priority::Normal) const noexcept
+    // DirectStorage Tile Stream
+    bool stream_tile(const std::string& virtual_path, void* d3d12_tiled_texture, uint32_t mip, uint32_t tile_x,
+                     uint32_t tile_y, uint32_t tile_z, int32_t priority, uint64_t* out_fence)
     {
-        if (!m_handle)
-            return std::nullopt;
-        uint64_t fence_val = 0;
-        std::string path_str(virtual_path);
-        int32_t res =
-            gpck_vfs_stream_file_to_d3d12_texture(m_handle.get(), path_str.c_str(), d3d12_texture, first_subresource,
-                                                  static_cast<int32_t>(priority), &fence_val);
-        if (res == GPCK_OK)
-            return fence_val;
-        return std::nullopt;
-    }
-
-    /**
-     * @brief DirectStorage: Streams a 64KB sparse tile directly into a D3D12 Tiled Resource.
-     */
-    [[nodiscard]] std::optional<uint64_t>
-    stream_tile_to_d3d12_texture(std::string_view virtual_path, void* d3d12_tiled_texture, uint32_t subresource,
-                                 uint32_t tile_x, uint32_t tile_y, uint32_t tile_z = 0,
-                                 Priority priority = Priority::Normal) const noexcept
-    {
-        if (!m_handle)
-            return std::nullopt;
-        uint64_t fence_val = 0;
-        std::string path_str(virtual_path);
-        int32_t res =
-            gpck_vfs_stream_tile_to_d3d12_texture(m_handle.get(), path_str.c_str(), d3d12_tiled_texture, subresource,
-                                                  tile_x, tile_y, tile_z, static_cast<int32_t>(priority), &fence_val);
-        if (res == GPCK_OK)
-            return fence_val;
-        return std::nullopt;
-    }
-
-    /**
-     * @brief DirectStorage: Waits for a GPU fence value to complete.
-     */
-    static bool wait_for_d3d12_fence(Priority priority, uint64_t fence_value) noexcept
-    {
-        return gpck_vfs_wait_for_d3d12_fence(static_cast<int32_t>(priority), fence_value) == GPCK_OK;
+        return gpck_vfs_stream_tile_to_d3d12_texture(m_vfs, virtual_path.c_str(), d3d12_tiled_texture, mip, tile_x,
+                                                     tile_y, tile_z, priority, out_fence) == GPCK_OK;
     }
 
 private:
-    VfsRawPtr m_handle{nullptr};
+    GpckVfs* m_vfs = nullptr;
 };
-
-/**
- * @brief Checks if DirectStorage 1.4 is active on the current hardware.
- */
-inline bool is_directstorage_supported() noexcept
-{
-    return gpck_directstorage_is_supported() != 0;
-}
 
 } // namespace gpck

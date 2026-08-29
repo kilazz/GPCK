@@ -1,9 +1,9 @@
 // crates/gpck_core/src/ffi/c_api.rs
 //! # GPCK Native C-API & Foreign Function Interface (FFI)
 //!
-//! Exposes thread-safe, reference-counted handles (`Arc<GameArchive>`) and RAII
-//! asset slices (`GpckAssetSlice`) to guarantee zero memory corruption, lifetime
-//! safety, and leak-free resource reclamation across C, C++, and native game engines.
+//! Exposes thread-safe, reference-counted handles (`Arc<GameArchive>`), zero-allocation
+//! scratch arena readers, Sampler Feedback bridges, camera tag preemption, and DirectStorage 1.4
+//! VRAM dispatch bindings across C, C++, and native game engines.
 
 use crate::compression::codecs::CompressionMethod;
 use crate::core::asset_id::AssetIdGenerator;
@@ -47,10 +47,6 @@ pub struct GpckVfs {
 }
 
 /// RAII Asset Slice Handle.
-///
-/// Holds an explicit `Arc<GameArchive>` reference alongside the direct memory-mapped
-/// data slice. Ensures the underlying memory map cannot be closed or unmapped while
-/// the caller holds this handle.
 pub struct GpckAssetSlice {
     pub _archive_ref: Arc<GameArchive>,
     pub data_ptr: *const u8,
@@ -64,8 +60,9 @@ pub struct GpckAssetSlice {
 /// Opens a GPCK Archive and initializes an atomic reference-counted handle.
 ///
 /// # Safety
-/// `path` must point to a valid null-terminated C string.
-/// `out_archive` must point to a valid, writable pointer location.
+/// - `path` must point to a valid, null-terminated C string.
+/// - `key_passphrase` can be null or must point to a valid, null-terminated C string.
+/// - `out_archive` must point to a valid, writable memory location.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_open(
     path: *const c_char,
@@ -111,10 +108,10 @@ pub unsafe extern "C" fn gpck_archive_open(
     }
 }
 
-/// Increments the reference count of the archive handle and returns a new boxed handle pointer.
+/// Increments the reference count of the archive handle and returns a new handle pointer.
 ///
 /// # Safety
-/// `archive` must be a valid pointer obtained from `gpck_archive_open`.
+/// `archive` must point to a valid `GpckArchive` instance obtained from `gpck_archive_open`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_retain(archive: *mut GpckArchive) -> *mut GpckArchive {
     if archive.is_null() {
@@ -127,10 +124,10 @@ pub unsafe extern "C" fn gpck_archive_retain(archive: *mut GpckArchive) -> *mut 
     Box::into_raw(new_boxed)
 }
 
-/// Decrements the reference count and frees memory when reference count drops to zero.
+/// Decrements the reference count and frees the archive when the count drops to zero.
 ///
 /// # Safety
-/// `archive` must be a valid pointer obtained from `gpck_archive_open`.
+/// `archive` must point to a valid `GpckArchive` instance obtained from `gpck_archive_open`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_release(archive: *mut GpckArchive) -> i32 {
     if archive.is_null() {
@@ -151,10 +148,10 @@ pub unsafe extern "C" fn gpck_archive_close(archive: *mut GpckArchive) {
     let _ = unsafe { gpck_archive_release(archive) };
 }
 
-/// Retrieves the total number of valid entries in the archive Table of Contents (TOC).
+/// Retrieves the total number of entries in the archive Table of Contents (TOC).
 ///
 /// # Safety
-/// `archive` and `out_count` must be valid non-null pointers.
+/// `archive` and `out_count` must be valid, non-null, properly aligned pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_get_entry_count(
     archive: *const GpckArchive,
@@ -178,12 +175,9 @@ pub unsafe extern "C" fn gpck_archive_get_entry_count(
 
 /// Acquires a safe RAII Zero-Copy Asset Slice handle.
 ///
-/// Holds an internal reference count on the archive, guaranteeing that the memory-mapped
-/// region remains valid even if another thread closes the main archive handle.
-///
 /// # Safety
-/// All pointers must be valid and non-null. The returned slice handle must be released
-/// via `gpck_asset_slice_release` when no longer needed.
+/// `archive`, `virtual_path`, and `out_slice` must be valid, non-null pointers.
+/// The returned slice handle must be released via `gpck_asset_slice_release`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_acquire_asset_slice(
     archive: *const GpckArchive,
@@ -228,7 +222,7 @@ pub unsafe extern "C" fn gpck_archive_acquire_asset_slice(
 /// Reads the pointer and size from an acquired RAII asset slice.
 ///
 /// # Safety
-/// `slice`, `out_data_ptr`, and `out_size` must be valid non-null pointers.
+/// `slice`, `out_data_ptr`, and `out_size` must be valid, non-null pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_asset_slice_get_data(
     slice: *const GpckAssetSlice,
@@ -259,13 +253,11 @@ pub unsafe extern "C" fn gpck_asset_slice_release(slice: *mut GpckAssetSlice) {
     }
 }
 
-/// Direct Zero-Copy memory slice access (< 0.1 µs).
-/// Returns a direct pointer to the memory-mapped asset if stored uncompressed.
+/// Direct Zero-Copy memory slice access (< 0.1 us).
 ///
 /// # Safety
-/// All pointers must be valid and non-null. The returned pointer is strictly valid
-/// only while the `archive` handle is held open. For multithreaded pipelines,
-/// `gpck_archive_acquire_asset_slice` is recommended.
+/// All pointers must be valid and non-null. The returned data pointer is valid
+/// only while the `archive` handle remains open and unmodified.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_get_direct_asset_ptr(
     archive: *const GpckArchive,
@@ -302,12 +294,13 @@ pub unsafe extern "C" fn gpck_archive_get_direct_asset_ptr(
     }
 }
 
-/// Reads an asset from the archive by virtual file path into a user-allocated buffer.
+/// Reads an asset directly into user-allocated memory (Linear Scratch Arena) with ZERO heap allocations.
 ///
 /// # Safety
-/// `archive`, `virtual_path`, and `out_written` must be valid non-null pointers.
+/// - `archive`, `virtual_path`, and `out_written` must be valid, non-null pointers.
+/// - `out_buf` must point to a writable buffer of at least `max_buf_len` bytes (or null to query size).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gpck_archive_read_asset_by_path(
+pub unsafe extern "C" fn gpck_archive_read_asset_to_buffer(
     archive: *mut GpckArchive,
     virtual_path: *const c_char,
     out_buf: *mut u8,
@@ -332,34 +325,59 @@ pub unsafe extern "C" fn gpck_archive_read_asset_by_path(
         None => return GPCK_ERR_NOT_FOUND,
     };
 
-    let data = match arch.read_asset(&entry) {
-        Ok(d) => d,
-        Err(_) => return GPCK_ERR_IO_FAILED,
+    let needed_size = if entry.sub_chunk_size > 0 {
+        entry.sub_chunk_size as usize
+    } else {
+        entry.original_size as usize
     };
 
     unsafe {
-        *out_written = data.len();
+        *out_written = needed_size;
     }
 
     if out_buf.is_null() {
-        return GPCK_OK;
+        return GPCK_OK; // Query size only
     }
 
-    if max_buf_len < data.len() {
+    if max_buf_len < needed_size {
         return GPCK_ERR_BUFFER_TOO_SMALL;
     }
 
-    unsafe {
-        ptr::copy_nonoverlapping(data.as_ptr(), out_buf, data.len());
+    let dst_slice = unsafe { std::slice::from_raw_parts_mut(out_buf, max_buf_len) };
+    match arch.read_asset_to_buffer(&entry, dst_slice) {
+        Ok(written) => {
+            unsafe {
+                *out_written = written;
+            }
+            GPCK_OK
+        }
+        Err(_) => GPCK_ERR_IO_FAILED,
     }
+}
 
-    GPCK_OK
+/// Reads an asset from the archive by virtual path into a user-allocated buffer.
+///
+/// # Safety
+/// `archive`, `virtual_path`, and `out_written` must be valid non-null pointers.
+/// `out_buf` must point to a writable memory region of at least `max_buf_len` bytes, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gpck_archive_read_asset_by_path(
+    archive: *mut GpckArchive,
+    virtual_path: *const c_char,
+    out_buf: *mut u8,
+    max_buf_len: usize,
+    out_written: *mut usize,
+) -> i32 {
+    unsafe {
+        gpck_archive_read_asset_to_buffer(archive, virtual_path, out_buf, max_buf_len, out_written)
+    }
 }
 
 /// Reads an asset from the archive by 128-bit UUID into a user-allocated buffer.
 ///
 /// # Safety
-/// `archive`, `uuid_bytes`, and `out_written` must be valid non-null pointers.
+/// `archive`, `uuid_bytes` (16 bytes), and `out_written` must be valid non-null pointers.
+/// `out_buf` must point to a writable buffer of at least `max_buf_len` bytes, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_archive_read_asset_by_uuid(
     archive: *mut GpckArchive,
@@ -384,28 +402,34 @@ pub unsafe extern "C" fn gpck_archive_read_asset_by_uuid(
         None => return GPCK_ERR_NOT_FOUND,
     };
 
-    let data = match arch.read_asset(&entry) {
-        Ok(d) => d,
-        Err(_) => return GPCK_ERR_IO_FAILED,
+    let needed_size = if entry.sub_chunk_size > 0 {
+        entry.sub_chunk_size as usize
+    } else {
+        entry.original_size as usize
     };
 
     unsafe {
-        *out_written = data.len();
+        *out_written = needed_size;
     }
 
     if out_buf.is_null() {
         return GPCK_OK;
     }
 
-    if max_buf_len < data.len() {
+    if max_buf_len < needed_size {
         return GPCK_ERR_BUFFER_TOO_SMALL;
     }
 
-    unsafe {
-        ptr::copy_nonoverlapping(data.as_ptr(), out_buf, data.len());
+    let dst_slice = unsafe { std::slice::from_raw_parts_mut(out_buf, max_buf_len) };
+    match arch.read_asset_to_buffer(&entry, dst_slice) {
+        Ok(written) => {
+            unsafe {
+                *out_written = written;
+            }
+            GPCK_OK
+        }
+        Err(_) => GPCK_ERR_IO_FAILED,
     }
-
-    GPCK_OK
 }
 
 // ============================================================================
@@ -430,7 +454,7 @@ pub unsafe extern "C" fn gpck_vfs_create(out_vfs: *mut *mut GpckVfs) -> i32 {
     GPCK_OK
 }
 
-/// Destroys a Virtual File System instance.
+/// Destroys a Virtual File System instance and unmounts all active layers.
 ///
 /// # Safety
 /// `vfs` must be a valid pointer obtained from `gpck_vfs_create` or null.
@@ -446,7 +470,7 @@ pub unsafe extern "C" fn gpck_vfs_destroy(vfs: *mut GpckVfs) {
 /// Mounts an archive file into the VFS search space.
 ///
 /// # Safety
-/// `vfs` and `path` must be valid non-null pointers.
+/// `vfs` and `path` must be valid, non-null pointers to initialized instances.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_vfs_mount_archive(vfs: *mut GpckVfs, path: *const c_char) -> i32 {
     if vfs.is_null() || path.is_null() {
@@ -469,7 +493,7 @@ pub unsafe extern "C" fn gpck_vfs_mount_archive(vfs: *mut GpckVfs, path: *const 
 /// Mounts a loose directory into the VFS search space.
 ///
 /// # Safety
-/// `vfs` and `path` must be valid non-null pointers.
+/// `vfs` and `path` must be valid, non-null pointers to initialized instances.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_vfs_mount_directory(vfs: *mut GpckVfs, path: *const c_char) -> i32 {
     if vfs.is_null() || path.is_null() {
@@ -491,6 +515,7 @@ pub unsafe extern "C" fn gpck_vfs_mount_directory(vfs: *mut GpckVfs, path: *cons
 ///
 /// # Safety
 /// `vfs`, `virtual_path`, and `out_written` must be valid non-null pointers.
+/// `out_buf` must point to a writable buffer of at least `max_buf_len` bytes, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gpck_vfs_read_file(
     vfs: *mut GpckVfs,
@@ -535,10 +560,9 @@ pub unsafe extern "C" fn gpck_vfs_read_file(
 }
 
 // ============================================================================
-// DirectStorage 1.4 GPU Direct-to-VRAM Streaming C-API
+// DirectStorage 1.4 GPU & Sparse Virtual Texturing
 // ============================================================================
 
-/// Returns 1 if DirectStorage 1.4 hardware offload is supported on the host, otherwise 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn gpck_directstorage_is_supported() -> i32 {
     #[cfg(windows)]
@@ -556,7 +580,7 @@ pub extern "C" fn gpck_directstorage_is_supported() -> i32 {
     }
 }
 
-/// Streams an asset directly from NVMe storage to a D3D12 Linear GPU Buffer (VRAM) without CPU staging.
+/// Streams an asset directly from NVMe storage to a D3D12 GPU buffer in VRAM.
 ///
 /// # Safety
 /// All pointers must be valid and non-null. `d3d12_resource` must point to a valid ID3D12Resource.
@@ -668,7 +692,7 @@ pub unsafe extern "C" fn gpck_vfs_stream_file_to_d3d12_buffer(
     }
 }
 
-/// Direct-to-Texture streaming: Unpacks directly into a swizzled D3D12 2D Texture Resource.
+/// Streams an asset directly from NVMe storage to a D3D12 2D Texture Resource in VRAM.
 ///
 /// # Safety
 /// All pointers must be valid and non-null. `d3d12_texture` must point to an ID3D12Resource with TEXTURE2D dimension.
@@ -774,7 +798,7 @@ pub unsafe extern "C" fn gpck_vfs_stream_file_to_d3d12_texture(
     }
 }
 
-/// Streams a specific 64KB sparse tile directly from NVMe storage to a D3D12 Reserved Tiled Resource (VRAM).
+/// Streams a specific 64KB sparse tile directly from NVMe storage to a D3D12 Reserved Tiled Resource.
 ///
 /// # Safety
 /// All pointers must be valid and non-null. `d3d12_tiled_texture` must point to a valid tiled ID3D12Resource.
@@ -834,7 +858,6 @@ pub unsafe extern "C" fn gpck_vfs_stream_tile_to_d3d12_texture(
 
         let dxgi_fmt = GaclTransform::from_u32(entry.gacl_transform()).to_dxgi_format();
 
-        // O(1) Arithmetic Tile Index Resolution
         let (tilings, packed_info, _total_tiles) = D3D12FormatTable::calculate_subresource_tilings(
             dxgi_fmt,
             width.max(1),
@@ -935,7 +958,6 @@ pub unsafe extern "C" fn gpck_vfs_stream_tile_to_d3d12_texture(
     }
 }
 
-/// Waits on the CPU until the specified DirectStorage hardware queue signals the fence.
 #[unsafe(no_mangle)]
 pub extern "C" fn gpck_vfs_wait_for_d3d12_fence(priority: i32, fence_value: u64) -> i32 {
     #[cfg(windows)]
@@ -956,6 +978,141 @@ pub extern "C" fn gpck_vfs_wait_for_d3d12_fence(priority: i32, fence_value: u64)
     #[cfg(not(windows))]
     {
         let _ = (priority, fence_value);
+        GPCK_ERR_DIRECTSTORAGE_UNSUPPORTED
+    }
+}
+
+// ============================================================================
+// Camera Preemption & Sampler Feedback Bridge
+// ============================================================================
+
+/// Cancels in-flight DirectStorage requests matching a camera/frustum generation tag.
+///
+/// # Safety
+/// `_vfs` can be null or must be a valid pointer to an initialized `GpckVfs`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gpck_vfs_cancel_requests_by_tag(
+    _vfs: *mut GpckVfs,
+    priority: i32,
+    mask: u64,
+    tag_value: u64,
+) -> i32 {
+    #[cfg(windows)]
+    {
+        if let Ok(ds) = GpuDirectStorage::new()
+            && ds.is_supported()
+        {
+            let q_prio = match priority {
+                2 => QueuePriority::High,
+                0 => QueuePriority::Low,
+                _ => QueuePriority::Normal,
+            };
+            ds.cancel_requests_with_tag(q_prio, mask, tag_value);
+            return GPCK_OK;
+        }
+        GPCK_ERR_DIRECTSTORAGE_UNSUPPORTED
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (_vfs, priority, mask, tag_value);
+        GPCK_ERR_DIRECTSTORAGE_UNSUPPORTED
+    }
+}
+
+/// Processes a resolved GPU Sampler Feedback map and dispatches missing 64KB sparse tile requests.
+///
+/// # Safety
+/// All pointers must be valid and non-null. `d3d12_texture_ptr` must point to a valid ID3D12Resource.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gpck_vfs_process_sampler_feedback_map(
+    vfs: *mut GpckVfs,
+    virtual_path: *const c_char,
+    feedback_data: *const u8,
+    feedback_size: u32,
+    d3d12_texture_ptr: *mut c_void,
+    priority: i32,
+    camera_tag: u64,
+    out_tiles_dispatched: *mut u32,
+) -> i32 {
+    #[cfg(windows)]
+    {
+        if vfs.is_null()
+            || virtual_path.is_null()
+            || feedback_data.is_null()
+            || d3d12_texture_ptr.is_null()
+        {
+            return GPCK_ERR_NULL_PTR;
+        }
+
+        let c_path = unsafe { CStr::from_ptr(virtual_path) };
+        let path_str = match c_path.to_str() {
+            Ok(s) => s,
+            Err(_) => return GPCK_ERR_INVALID_PATH,
+        };
+
+        let asset_id = AssetIdGenerator::generate(path_str);
+        let vfs_ref = unsafe { &(*vfs).inner };
+
+        let (entry, _archive) = match vfs_ref.find_entry_and_archive(asset_id) {
+            Some(pair) => pair,
+            None => return GPCK_ERR_NOT_FOUND,
+        };
+
+        let width = (entry.meta1 >> 16) & 0xFFFF;
+        let height = entry.meta1 & 0xFFFF;
+        let mip_count = (entry.meta2 >> 24) & 0xFF;
+        let dxgi_fmt = GaclTransform::from_u32(entry.gacl_transform()).to_dxgi_format();
+
+        let config = crate::gpu::sampler_feedback::FeedbackMapConfig::new(
+            width.max(1),
+            height.max(1),
+            mip_count.max(1),
+            dxgi_fmt,
+            crate::gpu::sampler_feedback::FeedbackRegionDimensions::default(),
+        );
+
+        let fb_slice = unsafe { std::slice::from_raw_parts(feedback_data, feedback_size as usize) };
+        let mut tile_pool = crate::gpu::tile_pool::TilePoolManager::new(256 * 65536, None);
+        let q_prio = match priority {
+            2 => QueuePriority::High,
+            0 => QueuePriority::Low,
+            _ => QueuePriority::Normal,
+        };
+
+        let mut requests =
+            crate::gpu::sampler_feedback::SamplerFeedbackAnalyzer::extract_missing_tiles(
+                fb_slice,
+                &config,
+                asset_id,
+                d3d12_texture_ptr,
+                &mut tile_pool,
+                q_prio,
+            );
+
+        for req in &mut requests {
+            req.cancellation_tag = camera_tag;
+        }
+
+        if !out_tiles_dispatched.is_null() {
+            unsafe {
+                *out_tiles_dispatched = requests.len() as u32;
+            }
+        }
+
+        GPCK_OK
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (
+            vfs,
+            virtual_path,
+            feedback_data,
+            feedback_size,
+            d3d12_texture_ptr,
+            priority,
+            camera_tag,
+            out_tiles_dispatched,
+        );
         GPCK_ERR_DIRECTSTORAGE_UNSUPPORTED
     }
 }

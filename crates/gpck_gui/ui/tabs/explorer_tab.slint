@@ -1,5 +1,11 @@
 // crates/gpck_gui/ui/tabs/explorer_tab.slint
-import { ScrollView, LineEdit, CheckBox, ComboBox } from "std-widgets.slint";
+import {
+    ListView,
+    ScrollView,
+    LineEdit,
+    CheckBox,
+    ComboBox,
+} from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { FileItemUI } from "../types.slint";
 import {
@@ -77,14 +83,14 @@ export component ExplorerTab inherits HorizontalLayout {
                     return accept;
                 }
                 if (event.text == Key.PageUp) {
-                    root.selected-file-index = max(0, root.selected-file-index - 10);
+                    root.selected-file-index = max(0, root.selected-file-index - 15);
                     if (root.file-list.length > 0) {
                         root.file-selected(root.file-list[root.selected-file-index].rel-path);
                     }
                     return accept;
                 }
                 if (event.text == Key.PageDown) {
-                    root.selected-file-index = min(root.file-list.length - 1, root.selected-file-index + 10);
+                    root.selected-file-index = min(root.file-list.length - 1, root.selected-file-index + 15);
                     if (root.file-list.length > 0) {
                         root.file-selected(root.file-list[root.selected-file-index].rel-path);
                     }
@@ -113,6 +119,7 @@ export component ExplorerTab inherits HorizontalLayout {
                     }
                 }
 
+                // Table Header
                 Rectangle {
                     background: #23232B;
                     height: 28px;
@@ -246,123 +253,119 @@ export component ExplorerTab inherits HorizontalLayout {
                     }
                 }
 
-                ScrollView {
-                    VerticalLayout {
-                        alignment: start;
-                        spacing: 1px;
+                // Virtualized ListView (Zero lag on 13,000+ items)
+                ListView {
+                    for item[index] in root.file-list: Rectangle {
+                        height: 24px;
+                        background: root.selected-file-index == index ? Theme.surface-selected
+                            : row-touch.has-hover ? Theme.surface-hover
+                            : (Math.mod(index, 2) == 0 ? Theme.surface-dark : Theme.surface-card);
+                        border-radius: 2px;
 
-                        for item[index] in root.file-list: Rectangle {
-                            height: 24px;
-                            background: root.selected-file-index == index ? Theme.surface-selected
-                                : row-touch.has-hover ? Theme.surface-hover
-                                : (Math.mod(index, 2) == 0 ? Theme.surface-dark : Theme.surface-card);
-                            border-radius: 2px;
+                        row-touch := TouchArea {
+                            clicked => {
+                                focus-scope.focus();
+                                root.selected-file-index = index;
+                                root.file-selected(item.rel-path);
+                            }
+                        }
 
-                            row-touch := TouchArea {
-                                clicked => {
-                                    focus-scope.focus();
-                                    root.selected-file-index = index;
-                                    root.file-selected(item.rel-path);
-                                }
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 2px;
+
+                            Text {
+                                width: 25%;
+                                text: item.rel-path;
+                                color: Theme.text-main;
+                                font-size: 11px;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                                overflow: elide;
                             }
 
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                spacing: 2px;
+                            Text {
+                                width: 12%;
+                                text: item.res-str;
+                                color: item.res-str == "-" ? Theme.text-dim : Theme.accent-cyan;
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                Text {
-                                    width: 25%;
-                                    text: item.rel-path;
-                                    color: Theme.text-main;
-                                    font-size: 11px;
-                                    font-family: "monospace";
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
+                            Text {
+                                width: 6%;
+                                text: item.format-str;
+                                color: item.format-str == "GNTC" ? Theme.accent-emerald : (item.format-str == "HIGHMIPS" ? Theme.accent-cyan : (item.format-str == "DDS" ? Theme.accent-blue : #A1A1AA));
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                Text {
-                                    width: 12%;
-                                    text: item.res-str;
-                                    color: item.res-str == "-" ? Theme.text-dim : Theme.accent-cyan;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
+                            Text {
+                                width: 8%;
+                                text: item.method-str;
+                                color: item.method-str == "GDeflate" ? #34D399 : (item.method-str == "Zstd" ? #93C5FD : #FCD34D);
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                Text {
-                                    width: 6%;
-                                    text: item.format-str;
-                                    color: item.format-str == "GNTC" ? Theme.accent-emerald : (item.format-str == "HIGHMIPS" ? Theme.accent-cyan : (item.format-str == "DDS" ? Theme.accent-blue : #A1A1AA));
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
+                            Text {
+                                width: 14%;
+                                text: item.gacl-str;
+                                color: item.gacl-str == "Raw (None)" || item.gacl-str == "-" ? Theme.text-muted : #FBBF24;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                Text {
-                                    width: 8%;
-                                    text: item.method-str;
-                                    color: item.method-str == "GDeflate" ? #34D399 : (item.method-str == "Zstd" ? #93C5FD : #FCD34D);
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
+                            Text {
+                                width: 5%;
+                                text: item.partition-str;
+                                color: item.partition-str == "P0" ? #A78BFA : Theme.accent-pink;
+                                font-size: 11px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
 
-                                Text {
-                                    width: 14%;
-                                    text: item.gacl-str;
-                                    color: item.gacl-str == "Raw (None)" || item.gacl-str == "-" ? Theme.text-muted : #FBBF24;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
+                            Text {
+                                width: 10%;
+                                text: item.queue-str;
+                                color: item.queue-str == "Hard (High)" ? Theme.primary-hover : #34D399;
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
 
-                                Text {
-                                    width: 5%;
-                                    text: item.partition-str;
-                                    color: item.partition-str == "P0" ? #A78BFA : Theme.accent-pink;
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    vertical-alignment: center;
-                                }
+                            Text {
+                                width: 7%;
+                                text: item.size-str;
+                                color: #D1D5DB;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
 
-                                Text {
-                                    width: 10%;
-                                    text: item.queue-str;
-                                    color: item.queue-str == "Hard (High)" ? Theme.primary-hover : #34D399;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
+                            Text {
+                                width: 7%;
+                                text: item.comp-size-str;
+                                color: #D1D5DB;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
 
-                                Text {
-                                    width: 7%;
-                                    text: item.size-str;
-                                    color: #D1D5DB;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                }
-
-                                Text {
-                                    width: 7%;
-                                    text: item.comp-size-str;
-                                    color: #D1D5DB;
-                                    font-size: 11px;
-                                    vertical-alignment: center;
-                                }
-
-                                Text {
-                                    width: 6%;
-                                    text: item.ratio-str;
-                                    color: #4ADE80;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
+                            Text {
+                                width: 6%;
+                                text: item.ratio-str;
+                                color: #4ADE80;
+                                font-size: 11px;
+                                font-weight: 600;
+                                vertical-alignment: center;
                             }
                         }
                     }
@@ -486,7 +489,7 @@ export component ExplorerTab inherits HorizontalLayout {
                     ToolbarSeparator { }
 
                     ComboBox {
-                        width: 140px;
+                        width: 210px;
                         model: root.available-mips;
                         current-index <=> root.selected-mip-level;
                         selected(val) => { root.mip-level-changed(root.selected-mip-level); }

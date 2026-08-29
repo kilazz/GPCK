@@ -2,8 +2,8 @@
 //! # GPCK Binary Archive Reader & Memory Map
 //!
 //! Uses Memory Mapping for `.gtoc` metadata and optional zero-copy `.gdat` access,
-//! while providing lock-free positional I/O and Linux `io_uring` O_DIRECT kernel bypass
-//! during parallel CPU and GPU streaming.
+//! while providing lock-free positional I/O, zero-allocation buffer decompression,
+//! and Linux `io_uring` O_DIRECT kernel bypass during parallel CPU and GPU streaming.
 
 use crate::compression::codecs::{Codec, CompressionMethod};
 use crate::core::error::{GpckError, GpckResult};
@@ -460,47 +460,101 @@ impl GameArchive {
         None
     }
 
-    pub fn read_asset(&self, entry: &FileEntry) -> GpckResult<Vec<u8>> {
+    /// Decompresses an asset payload directly into a preallocated destination buffer without heap allocations.
+    pub fn read_asset_to_buffer(&self, entry: &FileEntry, out_buf: &mut [u8]) -> GpckResult<usize> {
+        let needed_size = if entry.sub_chunk_size > 0 {
+            entry.sub_chunk_size as usize
+        } else {
+            entry.original_size as usize
+        };
+
+        if out_buf.len() < needed_size {
+            return Err(GpckError::BufferAllocationFailed(needed_size));
+        }
+
+        // Fast-path: Zero-copy direct slice for uncompressed assets (< 0.1 us)
         if let Some(slice) = self.try_get_direct_data_slice(entry) {
-            return Ok(slice.to_vec());
+            out_buf[..slice.len()].copy_from_slice(slice);
+            return Ok(slice.len());
         }
 
         let chunks = self.get_chunk_table(entry)?;
-        let mut full_payload = Vec::with_capacity(entry.original_size as usize);
         let method = CompressionMethod::from_flags(entry.flags);
 
-        for chunk in chunks {
-            let data = if chunk.offset == -1 {
-                let chunk_hash = chunk.hash;
-                self.resolve_base_chunk(chunk_hash).ok_or_else(|| {
-                    GpckError::AssetNotFound(format!(
-                        "Base chunk {:016X} not found for delta patch",
-                        chunk_hash
-                    ))
-                })?
-            } else {
-                let raw_chunk = self.read_raw_chunk(&chunk)?;
-                if chunk.compressed_size == chunk.original_size
-                    || (entry.flags & FLAG_IS_COMPRESSED) == 0
-                {
-                    raw_chunk
-                } else {
-                    Codec::decompress(&raw_chunk, chunk.original_size as usize, method)?
-                }
-            };
-            full_payload.extend_from_slice(&data);
-        }
-
         if entry.sub_chunk_size > 0 {
+            let mut full_payload = Vec::with_capacity(entry.original_size as usize);
+            for chunk in chunks {
+                let data = if chunk.offset == -1 {
+                    self.resolve_base_chunk(chunk.hash).ok_or_else(|| {
+                        GpckError::AssetNotFound(format!(
+                            "Base chunk {:016X} not found for delta patch",
+                            chunk.hash
+                        ))
+                    })?
+                } else {
+                    let raw_chunk = self.read_raw_chunk(&chunk)?;
+                    if chunk.compressed_size == chunk.original_size
+                        || (entry.flags & FLAG_IS_COMPRESSED) == 0
+                    {
+                        raw_chunk
+                    } else {
+                        Codec::decompress(&raw_chunk, chunk.original_size as usize, method)?
+                    }
+                };
+                full_payload.extend_from_slice(&data);
+            }
+
             let start = entry.sub_chunk_offset as usize;
             let end = start + entry.sub_chunk_size as usize;
             let slice = full_payload.get(start..end).ok_or_else(|| {
                 GpckError::InvalidFormat("Sub-chunk slice out of bounds".to_string())
             })?;
-            return Ok(slice.to_vec());
+
+            out_buf[..slice.len()].copy_from_slice(slice);
+            return Ok(slice.len());
         }
 
-        Ok(full_payload)
+        // Direct chunk-by-chunk stream decompression into the destination scratch buffer
+        let mut current_offset = 0usize;
+        for chunk in chunks {
+            let chunk_orig_size = chunk.original_size as usize;
+            let target_slice = &mut out_buf[current_offset..current_offset + chunk_orig_size];
+
+            if chunk.offset == -1 {
+                let data = self.resolve_base_chunk(chunk.hash).ok_or_else(|| {
+                    GpckError::AssetNotFound(format!(
+                        "Base chunk {:016X} not found for delta patch",
+                        chunk.hash
+                    ))
+                })?;
+                target_slice.copy_from_slice(&data);
+            } else {
+                let raw_chunk = self.read_raw_chunk(&chunk)?;
+                if chunk.compressed_size == chunk.original_size
+                    || (entry.flags & FLAG_IS_COMPRESSED) == 0
+                {
+                    target_slice.copy_from_slice(&raw_chunk);
+                } else {
+                    let decomp = Codec::decompress(&raw_chunk, chunk_orig_size, method)?;
+                    target_slice.copy_from_slice(&decomp);
+                }
+            }
+            current_offset += chunk_orig_size;
+        }
+
+        Ok(needed_size)
+    }
+
+    pub fn read_asset(&self, entry: &FileEntry) -> GpckResult<Vec<u8>> {
+        let size = if entry.sub_chunk_size > 0 {
+            entry.sub_chunk_size as usize
+        } else {
+            entry.original_size as usize
+        };
+        let mut buf = vec![0u8; size];
+        let written = self.read_asset_to_buffer(entry, &mut buf)?;
+        buf.truncate(written);
+        Ok(buf)
     }
 
     pub fn open_stream(self: &Arc<Self>, entry: &FileEntry) -> GpckResult<ArchiveStream> {

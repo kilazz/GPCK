@@ -1,5 +1,5 @@
 // crates/gpck_gui/ui/tabs/visualizer_tab.slint
-import { ScrollView, CheckBox } from "std-widgets.slint";
+import { ScrollView, CheckBox, ComboBox } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { BlockItemUI } from "../types.slint";
 import { LegendBadge } from "../components/widgets.slint";
@@ -8,6 +8,7 @@ export component VisualizerTab inherits Rectangle {
     in-out property <[BlockItemUI]> visualizer-blocks: [];
     in-out property <int> selected-block-index: -1;
     in-out property <bool> map-color-by-partition: false;
+    in-out property <int> density-mode-index: 0; // 0 = Auto-Fit (Screen), 1 = Micro (8px), 2 = Medium (16px), 3 = Large (28px)
 
     callback block-clicked(int);
 
@@ -17,7 +18,7 @@ export component VisualizerTab inherits Rectangle {
     border-color: Theme.border-subtle;
 
     map-focus-scope := FocusScope {
-        property <int> cols: Math.max(1, Math.floor((self.width - 48px) / 36px));
+        property <int> cols: map-matrix-container.cols;
 
         key-pressed(event) => {
             if (event.text == Key.LeftArrow) {
@@ -70,24 +71,24 @@ export component VisualizerTab inherits Rectangle {
 
         VerticalLayout {
             padding: 14px;
-            spacing: 12px;
+            spacing: 10px;
 
+            // Top Legend & Density Bar
             HorizontalLayout {
                 alignment: space-between;
 
                 HorizontalLayout {
-                    spacing: 14px;
+                    spacing: 12px;
                     alignment: center;
 
                     Text {
-                        text: "VFS Physical Disk Layout (\{root.visualizer-blocks.length} chunks on NVMe)";
+                        text: "NVMe Layout (\{root.visualizer-blocks.length} chunks)";
                         font-size: 13px;
                         font-weight: 700;
                         color: Theme.accent-blue;
                         vertical-alignment: center;
                     }
 
-                    // Optically aligned badges
                     LegendBadge {
                         badge-color: #81C784;
                         label: "GDeflate";
@@ -119,7 +120,7 @@ export component VisualizerTab inherits Rectangle {
                     }
 
                     Text {
-                        text: "★ = Boot Tail (Partition 0)";
+                        text: "★ = Boot Tail (P0)";
                         font-size: 11px;
                         color: #FBBF24;
                         font-weight: 700;
@@ -127,12 +128,29 @@ export component VisualizerTab inherits Rectangle {
                     }
                 }
 
-                CheckBox {
-                    text: "Color by NVMe Partition ID";
-                    checked <=> root.map-color-by-partition;
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: center;
+
+                    ComboBox {
+                        width: 170px;
+                        model: [
+                            "Scale: Auto-Fit (Screen)",
+                            "Scale: Micro (8px)",
+                            "Scale: Medium (16px)",
+                            "Scale: Large (28px)"
+                        ];
+                        current-index <=> root.density-mode-index;
+                    }
+
+                    CheckBox {
+                        text: "Color by Partition ID";
+                        checked <=> root.map-color-by-partition;
+                    }
                 }
             }
 
+            // Visualizer Grid Matrix
             Rectangle {
                 background: Theme.surface-nested;
                 border-radius: 4px;
@@ -142,26 +160,37 @@ export component VisualizerTab inherits Rectangle {
 
                 ScrollView {
                     map-matrix-container := Rectangle {
-                        property <int> cols: Math.max(1, Math.floor((self.width - 24px) / 36px));
+                        property <length> avail-w: max(200px, self.width - 32px);
+                        property <length> avail-h: max(200px, parent.height - 32px);
+                        property <int> total-n: max(1, root.visualizer-blocks.length);
 
-                        height: (24px + Math.ceil(root.visualizer-blocks.length / self.cols) * 36px);
+                        // Dynamic Auto-Fit Pitch Calculation based on screen area
+                        property <float> est-pitch-val: Math.sqrt((self.avail-w / 1px) * (self.avail-h / 1px) / self.total-n);
+                        property <length> auto-pitch: max(7px, min(36px, self.est-pitch-val * 0.95px));
+
+                        // Active pitch & block dimensions
+                        property <length> pitch: root.density-mode-index == 1 ? 9px : (root.density-mode-index == 2 ? 17px : (root.density-mode-index == 3 ? 30px : self.auto-pitch));
+                        property <length> block-size: max(5px, self.pitch - (self.pitch > 16px ? 3px : (self.pitch > 9px ? 2px : 1px)));
+                        property <int> cols: max(1, Math.floor(self.avail-w / self.pitch));
+
+                        height: max(parent.height, 24px + Math.ceil(root.visualizer-blocks.length / self.cols) * self.pitch);
 
                         for block[b-idx] in root.visualizer-blocks: Rectangle {
-                            x: 12px + Math.mod(b-idx, map-matrix-container.cols) * 36px;
-                            y: 12px + Math.floor(b-idx / map-matrix-container.cols) * 36px;
-                            width: 30px;
-                            height: 30px;
-                            border-radius: 4px;
+                            x: 14px + Math.mod(b-idx, map-matrix-container.cols) * map-matrix-container.pitch;
+                            y: 14px + Math.floor(b-idx / map-matrix-container.cols) * map-matrix-container.pitch;
+                            width: map-matrix-container.block-size;
+                            height: map-matrix-container.block-size;
+                            border-radius: map-matrix-container.block-size > 14px ? 3px : (map-matrix-container.block-size > 7px ? 2px : 1px);
                             background: root.map-color-by-partition ? block.color-part : block.color-algo;
-                            border-width: root.selected-block-index == b-idx ? 2px : (block-touch.has-hover ? 1px : 0px);
+                            border-width: root.selected-block-index == b-idx ? (map-matrix-container.block-size > 12px ? 2px : 1px) : (block-touch.has-hover ? 1px : 0px);
                             border-color: root.selected-block-index == b-idx ? #00E5FF : #FFFFFF;
 
-                            if block.is-boot_tail: Rectangle {
-                                x: 3px;
-                                y: 3px;
-                                width: 6px;
-                                height: 6px;
-                                border-radius: 3px;
+                            if block.is-boot_tail && map-matrix-container.block-size >= 12px: Rectangle {
+                                x: 2px;
+                                y: 2px;
+                                width: max(3px, map-matrix-container.block-size * 0.25);
+                                height: max(3px, map-matrix-container.block-size * 0.25);
+                                border-radius: 1px;
                                 background: #FBBF24;
                             }
 
@@ -183,7 +212,7 @@ export component VisualizerTab inherits Rectangle {
                 border-radius: 4px;
                 border-width: 1px;
                 border-color: Theme.border-card;
-                height: 90px;
+                height: 85px;
 
                 if root.selected-block-index >= 0: HorizontalLayout {
                     padding: 12px;
@@ -192,7 +221,7 @@ export component VisualizerTab inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
-                        spacing: 4px;
+                        spacing: 3px;
                         Text {
                             text: "Asset: " + root.visualizer-blocks[root.selected-block-index].file_name;
                             font-size: 12px;
@@ -202,7 +231,7 @@ export component VisualizerTab inherits Rectangle {
                         }
 
                         Text {
-                            text: "Physical Offset in .gdat: " + root.visualizer-blocks[root.selected-block-index].offset_str;
+                            text: "Offset in .gdat: " + root.visualizer-blocks[root.selected-block-index].offset_str;
                             font-size: 11px;
                             font-family: "monospace";
                             color: #A7F3D0;
@@ -211,7 +240,7 @@ export component VisualizerTab inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
-                        spacing: 4px;
+                        spacing: 3px;
                         Text {
                             text: "Uncompressed Size: " + root.visualizer-blocks[root.selected-block-index].size_str;
                             font-size: 11px;
@@ -227,7 +256,7 @@ export component VisualizerTab inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
-                        spacing: 4px;
+                        spacing: 3px;
                         Text {
                             text: "Storage Layer: " + root.visualizer-blocks[root.selected-block-index].partition_str;
                             font-size: 11px;
@@ -236,7 +265,7 @@ export component VisualizerTab inherits Rectangle {
                         }
 
                         Text {
-                            text: root.visualizer-blocks[root.selected-block-index].is_boot_tail ? "★ Boot Partition Tier (Instant Spawn)" : "GPU Streaming Queue Tier";
+                            text: root.visualizer-blocks[root.selected-block-index].is_boot_tail ? "★ Boot Partition Tier (P0 Instant)" : "GPU Streaming Queue Tier";
                             font-size: 11px;
                             color: root.visualizer-blocks[root.selected-block-index].is_boot_tail ? #FBBF24 : Theme.text-muted;
                         }
@@ -244,7 +273,7 @@ export component VisualizerTab inherits Rectangle {
 
                     VerticalLayout {
                         alignment: center;
-                        spacing: 4px;
+                        spacing: 3px;
                         Text {
                             text: "Codec: " + root.visualizer-blocks[root.selected-block-index].codec_str;
                             font-size: 11px;
