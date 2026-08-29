@@ -32,7 +32,7 @@ crypto = ["dep:aes-gcm", "dep:sha2", "dep:pbkdf2", "dep:hmac", "dep:rand"]
 # CPU Texture Decoding (image, image_dds)
 texture-decoders = ["dep:image", "dep:image_dds"]
 
-# NVIDIA RTX Neural Texture Compression (NTC)
+# Neural Texture Compression (NTC)
 neural-textures = []
 
 # Remote CDN Chunk Streaming over HTTP/HTTPS
