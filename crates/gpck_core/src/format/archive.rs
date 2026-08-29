@@ -8,7 +8,7 @@
 use crate::compression::codecs::{Codec, CompressionMethod};
 use crate::core::error::{GpckError, GpckResult};
 use crate::format::chd::ChdLookup;
-pub use crate::format::chd::hash_asset_id_with_seed;
+pub use crate::format::chd::{calculate_primary_hash_with_seed, hash_asset_id_with_seed};
 use crate::io::direct_io::LinuxDirectIoReader;
 use crate::io::stream::ArchiveStream;
 use bytemuck::{Pod, Zeroable};
@@ -25,8 +25,8 @@ bitflags::bitflags! {
         const IS_COMPRESSED   = 1 << 0;
         const ENCRYPTED_META  = 1 << 1;
         const DELETED         = 1 << 2;
-        const STREAMING       = 1 << 12; // Bit 12 (Disambiguated from resource types)
-        const BOOT_TAIL       = 1 << 13; // Bit 13 (Disambiguated from TYPE_NEURAL_TEXTURE)
+        const STREAMING       = 1 << 12;
+        const BOOT_TAIL       = 1 << 13;
     }
 }
 
@@ -117,7 +117,7 @@ pub struct BundleEntry {
     pub hash_table_capacity: i32,
     pub seed_table_offset: i64,
     pub seed_count: i32,
-    pub _pad0: i32,
+    pub master_seed: u32,
 }
 
 #[repr(C)]
@@ -299,10 +299,12 @@ impl GameArchive {
                 bundle.hash_table_capacity as usize,
                 bundle.seed_table_offset as usize,
                 bundle.seed_count as usize,
+                bundle.master_seed,
             ) {
                 return Some(entry);
             }
 
+            // Fallback Open-Addressing Scan
             let entry_size = std::mem::size_of::<FileEntry>();
             let capacity = bundle.hash_table_capacity as usize;
             let id_bytes = id.as_bytes();

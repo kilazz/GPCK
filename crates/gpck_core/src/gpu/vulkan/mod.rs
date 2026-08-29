@@ -3,11 +3,13 @@
 
 pub mod descriptor;
 pub mod pipeline;
+pub mod registry;
 pub mod worker;
 pub mod zstd_gpu;
 
 pub use descriptor::DescriptorPoolManager;
 pub use pipeline::{GaclPushConstants, VulkanComputePipeline};
+pub use registry::{PipelineRegistry, ShaderPassKey};
 pub use worker::{BoundedWorkerPool, MAX_GPU_WORKERS, WorkerContext};
 pub use zstd_gpu::VulkanZstdGpuEngine;
 
@@ -32,18 +34,10 @@ pub struct VulkanDecompressor {
     timeline_semaphore: vk::Semaphore,
     timeline_value: AtomicU64,
 
-    gdeflate_pipeline: Option<VulkanComputePipeline>,
-    zstd_pipeline: Option<VulkanComputePipeline>,
-    brotlig_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc1x_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc2_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc3x_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc4x_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc5x_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc6h_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_bc7_pipeline: Option<VulkanComputePipeline>,
-    unshuffle_curve_only_pipeline: Option<VulkanComputePipeline>,
+    // Centralized Compute Pipeline Registry
+    pipelines: PipelineRegistry,
 
+    // Multi-pass ATG Zstd GPU Streaming Engine
     pub zstd_engine: Option<VulkanZstdGpuEngine>,
 
     desc_pool_mgr: Mutex<DescriptorPoolManager>,
@@ -311,7 +305,9 @@ impl VulkanDecompressor {
                 .map_err(|e| GpckError::VulkanError(e.to_string()))?
         };
 
+        // ====================================================================
         // Descriptor Set Layouts
+        // ====================================================================
         let gdef_bindings = [
             vk::DescriptorSetLayoutBinding {
                 binding: 0,
@@ -382,67 +378,37 @@ impl VulkanDecompressor {
                 .map_err(|e| GpckError::VulkanError(e.to_string()))?
         };
 
-        // Load Compute Pipelines
-        let gdeflate_pipeline =
-            VulkanComputePipeline::create_from_shader(&device, gdef_set_layout, "GDeflate.spv")
-                .ok();
-        let zstd_pipeline =
-            VulkanComputePipeline::create_from_shader(&device, gdef_set_layout, "Zstd.spv").ok();
-        let brotlig_pipeline = VulkanComputePipeline::create_from_shader(
+        // ====================================================================
+        // Centralized Pipeline Registry Initialization
+        // ====================================================================
+        let mut pipelines = PipelineRegistry::new();
+
+        // 1. Decompression Shaders (4 storage buffers)
+        pipelines.register_batch(
             &device,
             gdef_set_layout,
-            "BrotliGCompute.spv",
-        )
-        .ok();
+            &[
+                ShaderPassKey::GDeflate,
+                ShaderPassKey::Zstd,
+                ShaderPassKey::BrotliG,
+            ],
+        );
 
-        let unshuffle_bc1x_pipeline = VulkanComputePipeline::create_from_shader(
+        // 2. GACL Texture Unshuffle Shaders (2 storage buffers + push constants)
+        pipelines.register_batch(
             &device,
             unshuffle_set_layout,
-            "UnshuffleBC1x.spv",
-        )
-        .ok();
-        let unshuffle_bc2_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleBC2.spv",
-        )
-        .ok();
-        let unshuffle_bc3x_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleBC3x.spv",
-        )
-        .ok();
-        let unshuffle_bc4x_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleBC4x.spv",
-        )
-        .ok();
-        let unshuffle_bc5x_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleBC5x.spv",
-        )
-        .ok();
-        let unshuffle_bc6h_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleBC6h.spv",
-        )
-        .ok();
-        let unshuffle_bc7_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleBC7.spv",
-        )
-        .ok();
-        let unshuffle_curve_only_pipeline = VulkanComputePipeline::create_from_shader(
-            &device,
-            unshuffle_set_layout,
-            "UnshuffleCurveOnly.spv",
-        )
-        .ok();
+            &[
+                ShaderPassKey::UnshuffleBc1x,
+                ShaderPassKey::UnshuffleBc2,
+                ShaderPassKey::UnshuffleBc3x,
+                ShaderPassKey::UnshuffleBc4x,
+                ShaderPassKey::UnshuffleBc5x,
+                ShaderPassKey::UnshuffleBc6h,
+                ShaderPassKey::UnshuffleBc7,
+                ShaderPassKey::UnshuffleCurveOnly,
+            ],
+        );
 
         let inst_clone = instance.clone();
         let phys_clone = physical_device;
@@ -473,17 +439,7 @@ impl VulkanDecompressor {
             command_pool: Mutex::new(command_pool),
             timeline_semaphore,
             timeline_value: AtomicU64::new(0),
-            gdeflate_pipeline,
-            zstd_pipeline,
-            brotlig_pipeline,
-            unshuffle_bc1x_pipeline,
-            unshuffle_bc2_pipeline,
-            unshuffle_bc3x_pipeline,
-            unshuffle_bc4x_pipeline,
-            unshuffle_bc5x_pipeline,
-            unshuffle_bc6h_pipeline,
-            unshuffle_bc7_pipeline,
-            unshuffle_curve_only_pipeline,
+            pipelines,
             zstd_engine,
             desc_pool_mgr: Mutex::new(desc_pool_mgr),
             gdef_set_layout,
@@ -504,7 +460,7 @@ impl VulkanDecompressor {
     }
 
     // ========================================================================
-    // Decomposed Pipeline Recording Stages
+    // Pipeline Recording Stages
     // ========================================================================
 
     unsafe fn record_upload_stage(
@@ -809,7 +765,7 @@ impl VulkanDecompressor {
         }
     }
 
-    /// Records and submits pipeline commands without blocking the host CPU.
+    /// Records and submits the multi-stage compute pipeline without blocking the CPU.
     fn record_and_submit(
         &self,
         worker: &mut WorkerContext,
@@ -820,8 +776,8 @@ impl VulkanDecompressor {
         width_pixels: usize,
     ) -> GpckResult<u64> {
         let is_zstd = decomp_method == Some(CompressionMethod::Zstd);
-        let decomp_pipe = self.resolve_decompression_pipeline(decomp_method);
-        let unshuffle_pipe = self.resolve_unshuffle_pipeline(unshuffle_transform);
+        let decomp_pipe = self.pipelines.get_decompression(decomp_method);
+        let unshuffle_pipe = self.pipelines.get_unshuffle(unshuffle_transform);
 
         unsafe {
             self.device
@@ -840,7 +796,7 @@ impl VulkanDecompressor {
             // Stage 1: Upload input buffer
             self.record_upload_stage(worker.cmd, worker, input_data);
 
-            // Stage 2: Decompression (Zstd ATG Multi-Pass or Compute Shader)
+            // Stage 2: Decompression (Zstd ATG Multi-Pass or Compute Pipeline)
             let has_decomp = if is_zstd
                 && let Some(ref atg_engine) = self.zstd_engine
                 && atg_engine.is_ready
@@ -868,7 +824,7 @@ impl VulkanDecompressor {
                 false
             };
 
-            // Stage 3: Unshuffle or Buffer Route to output
+            // Stage 3: Unshuffle or Direct Buffer Routing
             if let Some(pipe) = unshuffle_pipe {
                 if has_decomp {
                     let barrier = vk::BufferMemoryBarrier {
@@ -971,53 +927,6 @@ impl VulkanDecompressor {
         Ok(signal_val)
     }
 
-    #[inline(always)]
-    fn resolve_decompression_pipeline(
-        &self,
-        method: Option<CompressionMethod>,
-    ) -> Option<&VulkanComputePipeline> {
-        match method {
-            Some(CompressionMethod::Zstd) => self.zstd_pipeline.as_ref(),
-            Some(CompressionMethod::GDeflate) => self.gdeflate_pipeline.as_ref(),
-            Some(CompressionMethod::BrotliG) => self.brotlig_pipeline.as_ref(),
-            _ => None,
-        }
-    }
-
-    #[inline(always)]
-    fn resolve_unshuffle_pipeline(
-        &self,
-        transform: Option<GaclTransform>,
-    ) -> Option<&VulkanComputePipeline> {
-        match transform {
-            Some(
-                GaclTransform::Bc1Linear
-                | GaclTransform::Bc1LinearSpaceCurve
-                | GaclTransform::Bc1V2BitInterleaved
-                | GaclTransform::Bc1V2SpaceCurve,
-            ) => self.unshuffle_bc1x_pipeline.as_ref(),
-            Some(GaclTransform::Bc2AlphaNibble) => self.unshuffle_bc2_pipeline.as_ref(),
-            Some(
-                GaclTransform::Bc3Linear
-                | GaclTransform::Bc3LinearSpaceCurve
-                | GaclTransform::Bc3V2BitInterleaved
-                | GaclTransform::Bc3V2SpaceCurve,
-            ) => self.unshuffle_bc3x_pipeline.as_ref(),
-            Some(GaclTransform::Bc4Linear | GaclTransform::Bc4LinearSpaceCurve) => {
-                self.unshuffle_bc4x_pipeline.as_ref()
-            }
-            Some(GaclTransform::Bc5DualChannel | GaclTransform::Bc5SpaceCurve) => {
-                self.unshuffle_bc5x_pipeline.as_ref()
-            }
-            Some(GaclTransform::Bc6hHeaderJoin) => self.unshuffle_bc6h_pipeline.as_ref(),
-            Some(GaclTransform::Bc7ModeSplit | GaclTransform::Bc7ModeJoin) => {
-                self.unshuffle_bc7_pipeline.as_ref()
-            }
-            Some(GaclTransform::CurveOnly16B) => self.unshuffle_curve_only_pipeline.as_ref(),
-            _ => None,
-        }
-    }
-
     // ========================================================================
     // Execution API
     // ========================================================================
@@ -1027,7 +936,6 @@ impl VulkanDecompressor {
         target_value: u64,
         timeout: Option<std::time::Duration>,
     ) -> GpckResult<()> {
-        // Fast-path: Check if semaphore has already reached target value
         let current = unsafe {
             self.device
                 .get_semaphore_counter_value(self.timeline_semaphore)
@@ -1044,7 +952,6 @@ impl VulkanDecompressor {
         let device = self.device.clone();
         let semaphore = self.timeline_semaphore;
 
-        // Native OS/driver-level blocking wait offloaded to Tokio blocking pool
         tokio::task::spawn_blocking(move || {
             let wait_info = vk::SemaphoreWaitInfo {
                 s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
@@ -1522,8 +1429,8 @@ impl VulkanDecompressor {
         unsafe {
             self.device
                 .bind_buffer_memory(buffer, memory, 0)
-                .map_err(|e| GpckError::VulkanError(e.to_string()))?
-        };
+                .map_err(|e| GpckError::VulkanError(e.to_string()))?;
+        }
 
         Ok((buffer, memory))
     }
@@ -1625,39 +1532,8 @@ impl Drop for VulkanDecompressor {
                 atg.destroy(&self.device);
             }
 
-            if let Some(p) = self.gdeflate_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.zstd_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.brotlig_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc1x_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc2_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc3x_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc4x_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc5x_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc6h_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_bc7_pipeline.take() {
-                p.destroy(&self.device);
-            }
-            if let Some(p) = self.unshuffle_curve_only_pipeline.take() {
-                p.destroy(&self.device);
-            }
+            // Cleanly destroy all compute pipelines in the registry
+            self.pipelines.destroy(&self.device);
 
             self.device.destroy_semaphore(self.timeline_semaphore, None);
 

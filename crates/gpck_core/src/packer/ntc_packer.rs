@@ -13,13 +13,12 @@ use crate::compression::ntc::{
     GNTC_MAGIC, GntcHeader, NtcContext, NtcPbrMaterialBundle, f32_to_f16,
 };
 use crate::core::error::{GpckError, GpckResult};
-use crate::format::archive::{FLAG_STREAMING, TYPE_NEURAL_TEXTURE, TYPE_TILED_RESOURCE};
+use crate::format::archive::{TYPE_NEURAL_TEXTURE, TYPE_TILED_RESOURCE};
 use crate::format::dds::DdsUtils;
 use crate::graphics::bcn_decoder::*;
 use crate::graphics::dxgi_format::{D3D12FormatTable, dxgi};
 use crate::packer::chunker;
-use crate::packer::texture::{ProcessedFileParams, build_processed_file};
-use crate::packer::{PackerOptions, ProcessedFile};
+use crate::packer::types::{PackerOptions, ProcessedFile, ProcessedFileBuilder};
 
 const TILE_HARDWARE_ALIGNMENT: i64 = 65536;
 
@@ -314,22 +313,18 @@ impl NtcBundlePacker {
             options.atg_profile,
         )?;
 
-        let flags = FLAG_STREAMING | TYPE_NEURAL_TEXTURE | TYPE_TILED_RESOURCE;
         let meta1 = (bundle.width << 16) | (bundle.height & 0xFFFF);
         let meta2 = (mip_count << 24) | (chunks.len() as u32 & 0xFFFF);
 
-        let mut processed = build_processed_file(ProcessedFileParams {
-            rel_path: rel_material_path.to_string(),
-            original_size: container_payload.len() as u32,
-            chunks,
-            flags,
-            tags: options.tags,
-            method,
-            alignment: TILE_HARDWARE_ALIGNMENT,
-            key: options.key.as_ref(),
-        });
-        processed.meta1 = meta1;
-        processed.meta2 = meta2;
+        let processed =
+            ProcessedFileBuilder::new(rel_material_path, container_payload.len() as u32, method)
+                .chunks(chunks)
+                .flags(TYPE_NEURAL_TEXTURE | TYPE_TILED_RESOURCE)
+                .metadata(meta1, meta2)
+                .tags(options.tags)
+                .alignment(TILE_HARDWARE_ALIGNMENT)
+                .encryption_key(options.key.as_ref())
+                .build();
 
         Ok(processed)
     }

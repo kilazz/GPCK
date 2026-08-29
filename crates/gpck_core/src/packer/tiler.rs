@@ -6,7 +6,7 @@ use crate::core::error::{GpckError, GpckResult};
 use crate::gacl::{Gacl, GaclTransform};
 use crate::graphics::dxgi_format::D3D12FormatTable;
 use crate::packer::texture::select_format_override;
-use crate::packer::{PackerOptions, ProcessedChunk};
+use crate::packer::types::{PackerOptions, ProcessedChunk, TextureMetadata};
 
 pub const D3D12_TILE_SIZE: usize = 65536; // 64 KB
 
@@ -25,21 +25,15 @@ pub struct TiledTexturePacker;
 impl TiledTexturePacker {
     /// Slices, conditions, and compresses texture subresources into standalone 64 KB hardware tiles.
     ///
-    /// Standard mips and packed tail tiles are partitioned separately to allow immediate
-    /// Partition 0 (Boot) placement of tail mips for sub-100ms startup rendering.
+    /// Accepts a strongly-typed `TextureMetadata` descriptor instead of primitive argument lists.
     pub fn slice_and_compress_texture_tiles(
         raw_dds_or_ktx: &[u8],
-        header_len: usize,
-        dxgi_fmt: u32,
-        width: u32,
-        height: u32,
-        mip_count: u32,
+        meta: &TextureMetadata,
         options: &PackerOptions,
     ) -> GpckResult<TileSliceResult> {
-        let is_block_compressed = D3D12FormatTable::is_block_compressed(dxgi_fmt);
-        let element_size = D3D12FormatTable::get_element_size(dxgi_fmt).unwrap_or(16);
+        let is_block_compressed = meta.is_block_compressed();
+        let element_size = meta.element_size();
 
-        // Ensure options method is resolved from Auto to a concrete algorithm
         let mut resolved_options = options.clone();
         if resolved_options.method == CompressionMethod::Auto {
             resolved_options.method = if crate::compression::gdeflate::is_gdeflate_available() {
@@ -49,28 +43,33 @@ impl TiledTexturePacker {
             };
         }
 
-        // 1. Calculate Standard vs Packed Mip Tilings (D3D12 Spec)
+        // 1. Calculate Standard vs Packed Mip Tilings (D3D12 Specification)
         let (tilings, packed_info, total_tiles) = D3D12FormatTable::calculate_subresource_tilings(
-            dxgi_fmt, width, height, 1, mip_count, 1,
+            meta.dxgi_format,
+            meta.width,
+            meta.height,
+            1,
+            meta.mip_count,
+            1,
         );
 
         let num_standard_mips = packed_info.num_standard_mips as u32;
         let num_packed_mips = packed_info.num_packed_mips as u32;
 
-        let tile_shape = D3D12FormatTable::get_tile_shape_64k(dxgi_fmt, false);
+        let tile_shape = D3D12FormatTable::get_tile_shape_64k(meta.dxgi_format, false);
         let tile_w = tile_shape.width_in_texels;
         let tile_h = tile_shape.height_in_texels;
 
         // 2. Extract Byte Slices for each Mip Level from DDS/KTX2 Payload
-        let mut mip_payloads = Vec::with_capacity(mip_count as usize);
-        let mut curr_offset = header_len;
+        let mut mip_payloads = Vec::with_capacity(meta.mip_count as usize);
+        let mut curr_offset = meta.header_length;
 
-        for m in 0..mip_count {
-            let (mw, mh, _) = D3D12FormatTable::get_mip_dimensions(m, width, height, 1);
+        for m in 0..meta.mip_count {
+            let (mw, mh, _) = D3D12FormatTable::get_mip_dimensions(m, meta.width, meta.height, 1);
             let mip_size = if is_block_compressed {
                 mw.div_ceil(4) as usize * mh.div_ceil(4) as usize * element_size
             } else {
-                let bpu = D3D12FormatTable::get_bits_per_unit(dxgi_fmt);
+                let bpu = D3D12FormatTable::get_bits_per_unit(meta.dxgi_format);
                 (mw as usize * mh as usize * bpu as usize) / 8
             };
 
@@ -82,12 +81,12 @@ impl TiledTexturePacker {
             curr_offset += mip_size;
         }
 
-        // 3. Slice all subresources into Raw 64KB Tile Buffers (In-Memory)
+        // 3. Slice all subresources into Raw 64KB Tile Buffers
         let mut raw_standard_tiles = Vec::new();
 
         for m in 0..num_standard_mips {
             let tiling = &tilings[m as usize];
-            let (mw, mh, _) = D3D12FormatTable::get_mip_dimensions(m, width, height, 1);
+            let (mw, mh, _) = D3D12FormatTable::get_mip_dimensions(m, meta.width, meta.height, 1);
             let mip_data = mip_payloads.get(m as usize).copied().unwrap_or(&[]);
 
             if is_block_compressed {
@@ -123,7 +122,7 @@ impl TiledTexturePacker {
                     }
                 }
             } else {
-                let bpu = D3D12FormatTable::get_bits_per_unit(dxgi_fmt);
+                let bpu = D3D12FormatTable::get_bits_per_unit(meta.dxgi_format);
                 let pixel_size = (bpu / 8).max(1) as usize;
                 let mip_pitch = mw as usize * pixel_size;
                 let tile_pitch = tile_w as usize * pixel_size;
@@ -157,12 +156,12 @@ impl TiledTexturePacker {
             }
         }
 
-        // 4. Assemble and Pad Tail Mip Tiles (Separated for Partition 0 Boot Placement)
+        // 4. Assemble and Pad Tail Mip Tiles (Partition 0 Boot Placement)
         let mut raw_tail_tiles = Vec::new();
         if num_packed_mips > 0 {
             let mut packed_tail_bytes = Vec::with_capacity(D3D12_TILE_SIZE);
 
-            for m in num_standard_mips..mip_count {
+            for m in num_standard_mips..meta.mip_count {
                 if let Some(&slice) = mip_payloads.get(m as usize) {
                     packed_tail_bytes.extend_from_slice(slice);
                 }
@@ -184,7 +183,7 @@ impl TiledTexturePacker {
             Self::evaluate_transform_across_all_tiles(
                 &raw_standard_tiles,
                 &raw_tail_tiles,
-                dxgi_fmt,
+                meta.dxgi_format,
                 tile_w as usize,
                 element_size,
                 GaclTransform::None,
@@ -197,18 +196,19 @@ impl TiledTexturePacker {
         let mut best_total_size = baseline_size;
 
         if resolved_options.gacl.enabled {
-            let candidate_list =
-                if let Some(forced) = select_format_override(dxgi_fmt, &resolved_options.gacl) {
-                    if !resolved_options.gacl.auto_mode {
-                        vec![forced]
-                    } else {
-                        Self::get_candidate_transforms(dxgi_fmt, element_size).to_vec()
-                    }
-                } else if resolved_options.gacl.auto_mode {
-                    Self::get_candidate_transforms(dxgi_fmt, element_size).to_vec()
+            let candidate_list = if let Some(forced) =
+                select_format_override(meta.dxgi_format, &resolved_options.gacl)
+            {
+                if !resolved_options.gacl.auto_mode {
+                    vec![forced]
                 } else {
-                    Vec::new()
-                };
+                    Self::get_candidate_transforms(meta.dxgi_format, element_size).to_vec()
+                }
+            } else if resolved_options.gacl.auto_mode {
+                Self::get_candidate_transforms(meta.dxgi_format, element_size).to_vec()
+            } else {
+                Vec::new()
+            };
 
             for candidate in candidate_list {
                 if candidate == GaclTransform::None {
@@ -219,7 +219,7 @@ impl TiledTexturePacker {
                     Self::evaluate_transform_across_all_tiles(
                         &raw_standard_tiles,
                         &raw_tail_tiles,
-                        dxgi_fmt,
+                        meta.dxgi_format,
                         tile_w as usize,
                         element_size,
                         candidate,
@@ -258,7 +258,6 @@ impl TiledTexturePacker {
         let mut tail_chunks = Vec::with_capacity(tail_tiles.len());
         let mut total_size = 0usize;
 
-        // A. Standard Mip Tiles
         for tile in standard_tiles {
             let conditioned_tile = if transform != GaclTransform::None {
                 Self::apply_tile_conditioning(
@@ -284,7 +283,6 @@ impl TiledTexturePacker {
             std_chunks.push(chunk);
         }
 
-        // B. Packed Tail Tiles (Always preserved with linear stream split or raw fallback)
         let tail_transform = get_linear_transform(transform);
         for tail_tile in tail_tiles {
             let conditioned_tail = if tail_transform != GaclTransform::None {
@@ -424,7 +422,6 @@ impl TiledTexturePacker {
                 Ok(decompressed) => {
                     let decomp_hash = twox_hash::XxHash64::oneshot(0, &decompressed);
                     if decomp_hash != hash {
-                        // Detailed byte-level difference analysis
                         let mut first_diff_idx = None;
                         let mut diff_count = 0usize;
 
@@ -440,46 +437,6 @@ impl TiledTexturePacker {
                         }
 
                         let diff_idx = first_diff_idx.unwrap_or(0);
-                        let orig_slice = &tile_data[diff_idx..(diff_idx + 16).min(tile_data.len())];
-                        let dec_slice =
-                            &decompressed[diff_idx..(diff_idx + 16).min(decompressed.len())];
-
-                        let diag_msg = format!(
-                            "\n==================== [BROTLI-G CHUNK MISMATCH DIAGNOSTIC] ====================\n\
-                             Chunk Hash           : {:016X}\n\
-                             Original Size        : {} bytes\n\
-                             Compressed Size      : {} bytes (Ratio: {:.1}%)\n\
-                             Decompressed Size    : {} bytes\n\
-                             Total Mismatched     : {} / {} bytes ({:.2}% corrupted)\n\
-                             First Mismatch Offset: Byte {} (0x{:04X})\n\
-                             Original Bytes       : {:02X?}\n\
-                             Decompressed Bytes   : {:02X?}\n\
-                             ================================================================================",
-                            hash,
-                            tile_data.len(),
-                            compressed.len(),
-                            (compressed.len() as f64 / tile_data.len() as f64) * 100.0,
-                            decompressed.len(),
-                            diff_count,
-                            tile_data.len(),
-                            (diff_count as f64 / tile_data.len() as f64) * 100.0,
-                            diff_idx,
-                            diff_idx,
-                            orig_slice,
-                            dec_slice
-                        );
-
-                        crate::core::logger::log_error(&diag_msg);
-                        eprintln!("{}", diag_msg);
-
-                        // Save failure dumps into the centralized log directory for offline analysis
-                        let log_dir = crate::core::paths::GpckPaths::get_logs_dir();
-                        let _ = std::fs::write(log_dir.join("failed_tile_orig.bin"), tile_data);
-                        let _ =
-                            std::fs::write(log_dir.join("failed_tile_compressed.bin"), &compressed);
-                        let _ =
-                            std::fs::write(log_dir.join("failed_tile_decomp.bin"), &decompressed);
-
                         return Err(GpckError::ChunkValidationFailed {
                             hash,
                             message: format!(

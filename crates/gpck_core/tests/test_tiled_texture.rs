@@ -5,9 +5,9 @@ use gpck_core::compression::codecs::{Codec, CompressionMethod};
 use gpck_core::format::archive::TYPE_TILED_RESOURCE;
 use gpck_core::graphics::dxgi_format::dxgi;
 use gpck_core::graphics::recombine::TextureRecombiner;
-use gpck_core::packer::PackerOptions;
 use gpck_core::packer::texture::process_file;
 use gpck_core::packer::tiler::{D3D12_TILE_SIZE, TiledTexturePacker};
+use gpck_core::packer::{PackerOptions, TextureMetadata};
 use std::fs;
 
 #[test]
@@ -29,12 +29,9 @@ fn test_slice_and_reconstruct_64k_tiles() {
         ..Default::default()
     };
 
-    let tile_res = TiledTexturePacker::slice_and_compress_texture_tiles(
-        &dds_data, 148, // DX10 Header size
-        dxgi_fmt, width, height, 1, // 1 Mip level
-        &options,
-    )
-    .unwrap();
+    let meta = TextureMetadata::new(width, height, 1, dxgi_fmt, 148);
+    let tile_res =
+        TiledTexturePacker::slice_and_compress_texture_tiles(&dds_data, &meta, &options).unwrap();
 
     // 512x512 BC7 has 4 tiles of 256x256 (64 KB each)
     assert_eq!(tile_res.total_tiles, 4);

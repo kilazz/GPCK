@@ -1,8 +1,8 @@
-// src/format/chd.rs
+// crates/gpck_core/src/format/chd.rs
 //! # CHD (Compress, Hash, and Displace) Minimal Perfect Hashing
 //!
 //! Provides deterministic O(1) hash evaluation and collision-free slot resolution
-//! for Table of Contents (TOC) lookups with a 1.0 load factor.
+//! for Table of Contents (TOC) lookups with a 1.0 load factor and multi-trial master seed support.
 
 use crate::format::archive::{FLAG_DELETED, FileEntry};
 use uuid::Uuid;
@@ -16,10 +16,23 @@ pub fn hash_asset_id_with_seed(seed: u32, id_bytes: &[u8; 16]) -> u64 {
     twox_hash::XxHash64::oneshot(0, &payload)
 }
 
-/// Computes the primary 64-bit hash from the first 8 bytes of an asset UUID.
+/// Computes the primary 64-bit bucket distribution hash incorporating the bundle's master seed.
+#[inline(always)]
+pub fn calculate_primary_hash_with_seed(id: &Uuid, master_seed: u32) -> u64 {
+    if master_seed == 0 {
+        u64::from_le_bytes(id.as_bytes()[0..8].try_into().unwrap())
+    } else {
+        let mut payload = [0u8; 20];
+        payload[..4].copy_from_slice(&master_seed.to_le_bytes());
+        payload[4..].copy_from_slice(id.as_bytes());
+        twox_hash::XxHash64::oneshot(0, &payload)
+    }
+}
+
+/// Computes the default primary hash (master seed = 0).
 #[inline(always)]
 pub fn calculate_primary_hash(id: &Uuid) -> u64 {
-    u64::from_le_bytes(id.as_bytes()[0..8].try_into().unwrap())
+    calculate_primary_hash_with_seed(id, 0)
 }
 
 /// Resolves the destination slot in the hash table given displacement seed and capacity.
@@ -43,12 +56,13 @@ impl ChdLookup {
         capacity: usize,
         seed_table_offset: usize,
         seed_count: usize,
+        master_seed: u32,
     ) -> Option<FileEntry> {
         if capacity == 0 || seed_count == 0 {
             return None;
         }
 
-        let hash = calculate_primary_hash(&id);
+        let hash = calculate_primary_hash_with_seed(&id, master_seed);
         let id_bytes = id.as_bytes();
         let bucket_idx = (hash % seed_count as u64) as usize;
         let disp_offset = seed_table_offset + bucket_idx * 4;

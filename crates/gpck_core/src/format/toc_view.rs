@@ -3,7 +3,7 @@
 
 use crate::core::error::{GpckError, GpckResult};
 use crate::format::archive::{ArchiveHeader, BundleEntry, FLAG_DELETED, FileEntry};
-use crate::format::chd::{ChdLookup, calculate_primary_hash};
+use crate::format::chd::{ChdLookup, calculate_primary_hash_with_seed};
 use uuid::Uuid;
 
 pub struct MasterTocView<'a> {
@@ -53,7 +53,7 @@ impl<'a> MasterTocView<'a> {
                 continue;
             }
 
-            // 1. Unified O(1) Minimal Perfect Hashing
+            // Unified O(1) Minimal Perfect Hashing with Master Seed
             if seed_count > 0
                 && bundle.seed_table_offset > 0
                 && let Some(entry) = ChdLookup::query_entry_from_mmap(
@@ -63,13 +63,14 @@ impl<'a> MasterTocView<'a> {
                     capacity,
                     bundle.seed_table_offset as usize,
                     seed_count,
+                    bundle.master_seed,
                 )
             {
                 return Some(entry);
             }
 
-            // 2. Open-Addressing fallback
-            let hash = calculate_primary_hash(&id);
+            // Open-Addressing fallback
+            let hash = calculate_primary_hash_with_seed(&id, bundle.master_seed);
             let index = (hash % capacity as u64) as usize;
             for i in 0..capacity {
                 let probe = (index + i) % capacity;

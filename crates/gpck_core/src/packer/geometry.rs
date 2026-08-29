@@ -6,11 +6,10 @@
 
 use crate::compression::codecs::CompressionMethod;
 use crate::core::error::{GpckError, GpckResult};
-use crate::format::archive::{FLAG_STREAMING, TYPE_MESHLET_CONTAINER};
+use crate::format::archive::TYPE_MESHLET_CONTAINER;
 use crate::geometry::meshlet::{MeshletBuilder, RawVertex};
 use crate::packer::chunker;
-use crate::packer::texture::{ProcessedFileParams, build_processed_file};
-use crate::packer::{PackerOptions, ProcessedFile};
+use crate::packer::types::{PackerOptions, ProcessedFile, ProcessedFileBuilder};
 use std::fs;
 use std::path::Path;
 
@@ -44,8 +43,6 @@ pub fn process_geometry_file(
         m => m,
     };
 
-    let flags = FLAG_STREAMING | TYPE_MESHLET_CONTAINER;
-
     let chunks = chunker::compress_to_chunks(
         &gmesh_payload,
         options.chunk_size,
@@ -55,16 +52,13 @@ pub fn process_geometry_file(
         options.atg_profile,
     )?;
 
-    let processed = build_processed_file(ProcessedFileParams {
-        rel_path: rel_path.to_string(),
-        original_size: gmesh_payload.len() as u32,
-        chunks,
-        flags,
-        tags: options.tags,
-        method,
-        alignment: TILE_HARDWARE_ALIGNMENT,
-        key: options.key.as_ref(),
-    });
+    let processed = ProcessedFileBuilder::new(rel_path, gmesh_payload.len() as u32, method)
+        .chunks(chunks)
+        .flags(TYPE_MESHLET_CONTAINER)
+        .tags(options.tags)
+        .alignment(TILE_HARDWARE_ALIGNMENT)
+        .encryption_key(options.key.as_ref())
+        .build();
 
     Ok(vec![processed])
 }

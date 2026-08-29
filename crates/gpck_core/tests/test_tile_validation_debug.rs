@@ -8,8 +8,8 @@ use gpck_core::benchmark::generators::{
 use gpck_core::compression::codecs::{Codec, CompressionMethod};
 use gpck_core::graphics::dxgi_format::{D3D12FormatTable, dxgi};
 use gpck_core::graphics::recombine::TextureRecombiner;
-use gpck_core::packer::PackerOptions;
 use gpck_core::packer::tiler::{D3D12_TILE_SIZE, TiledTexturePacker};
+use gpck_core::packer::{PackerOptions, TextureMetadata};
 
 #[test]
 fn test_ultra_compressible_flat_and_zero_tiles() {
@@ -156,9 +156,9 @@ fn test_diagnose_all_codecs_on_crysis_texture_patterns() {
                 ..Default::default()
             };
 
-            let tile_res = TiledTexturePacker::slice_and_compress_texture_tiles(
-                &dds_data, 148, dxgi_fmt, width, height, mips, &options,
-            );
+            let meta = TextureMetadata::new(width, height, mips, dxgi_fmt, 148);
+            let tile_res =
+                TiledTexturePacker::slice_and_compress_texture_tiles(&dds_data, &meta, &options);
 
             match tile_res {
                 Ok(res) => {
@@ -169,7 +169,6 @@ fn test_diagnose_all_codecs_on_crysis_texture_patterns() {
                     println!("    GACL Uniform Transform: {:?}", res.gacl_transform);
 
                     let mut failed_tiles = 0;
-                    // Combine standard mip tiles and packed tail tiles for validation
                     for (tile_idx, chunk) in res
                         .standard_chunks
                         .iter()

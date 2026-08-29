@@ -18,17 +18,17 @@ pub mod types;
 #[cfg(feature = "neural-textures")]
 pub mod ntc_packer;
 
-// Public re-exports for the crate API
+// Public re-exports for crate API
 pub use discovery::AssetDiscovery;
 pub use geometry::process_geometry_file;
 #[cfg(feature = "neural-textures")]
 pub use ntc_packer::NtcBundlePacker;
 pub use pipeline::PackingPipeline;
-pub use texture::{ProcessedFileParams, build_processed_file};
 pub use tiler::{D3D12_TILE_SIZE, TileSliceResult, TiledTexturePacker};
 pub use types::{
     DEFAULT_CHUNK_SIZE, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions,
     PackerOptions, PbrSuffixConfig, PipGap, PipTocEntry, ProcessedChunk, ProcessedFile,
+    ProcessedFileBuilder, TextureConditioningResult, TextureMetadata,
 };
 
 use crate::core::error::GpckResult;
