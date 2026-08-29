@@ -1,18 +1,107 @@
 // crates/gpck_core/src/packer/types.rs
 //! # Core Data Types for Asset Packaging Pipeline
 //!
-//! Defines configuration structures, chunk definitions, and 64KB hardware tile models.
+//! Defines configuration structures, chunk definitions, 64KB hardware tile models,
+//! PBR auto-clustering suffix rules, and neural texture compression (NTC) settings.
 
 use crate::compression::codecs::CompressionMethod;
 use crate::format::archive::TAG_BASE_GAME;
 use uuid::Uuid;
 
 /// Native 64 KB D3D12 / Vulkan Sparse Hardware Tile Chunk Size (65,536 bytes).
-/// Aligns 1:1 with D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES for direct Virtual Texturing.
 pub const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Default NVMe Partition Boundary (64 MB).
 pub const DEFAULT_MAX_PARTITION_SIZE: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct PbrSuffixConfig {
+    pub albedo: Vec<String>,
+    pub normal: Vec<String>,
+    pub metallic: Vec<String>,
+    pub roughness: Vec<String>,
+    pub ao: Vec<String>,
+    pub displacement: Vec<String>,
+}
+
+impl Default for PbrSuffixConfig {
+    fn default() -> Self {
+        Self {
+            albedo: vec![
+                "_diff".into(),
+                "_albedo".into(),
+                "_basecolor".into(),
+                "_color".into(),
+                "_col".into(),
+                "_d".into(),
+                "_alb".into(),
+            ],
+            normal: vec![
+                "_ddn".into(),
+                "_ddna".into(),
+                "_normal".into(),
+                "_norm".into(),
+                "_nrm".into(),
+                "_n".into(),
+                "_nor".into(),
+            ],
+            metallic: vec![
+                "_spec".into(),
+                "_specular".into(),
+                "_metal".into(),
+                "_metallic".into(),
+                "_metalness".into(),
+                "_m".into(),
+                "_met".into(),
+            ],
+            roughness: vec![
+                "_gloss".into(),
+                "_rough".into(),
+                "_roughness".into(),
+                "_r".into(),
+                "_rgh".into(),
+            ],
+            ao: vec![
+                "_ao".into(),
+                "_ambient".into(),
+                "_occlusion".into(),
+                "_ambientocclusion".into(),
+            ],
+            displacement: vec![
+                "_displ".into(),
+                "_disp".into(),
+                "_height".into(),
+                "_h".into(),
+                "_bump".into(),
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct NtcPackerOptions {
+    pub enabled: bool,
+    pub target_bpp: f32,
+    pub training_steps: i32,
+    pub auto_bundle_pbr: bool,
+    pub precompute_bc7_modes: bool,
+    pub stable_training: bool,
+    pub pbr_suffixes: PbrSuffixConfig,
+}
+
+impl Default for NtcPackerOptions {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target_bpp: 5.0,
+            training_steps: 10000,
+            auto_bundle_pbr: true,
+            precompute_bc7_modes: true,
+            stable_training: true,
+            pbr_suffixes: PbrSuffixConfig::default(),
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct GaclFormatOverrides {
@@ -74,18 +163,10 @@ pub struct PackerOptions {
     pub validate_chunks: bool,
     pub max_partition_size: usize,
     pub gacl: GaclFormatOverrides,
+    pub ntc: NtcPackerOptions,
     pub atg_profile: bool,
     pub tiled_streaming: bool,
-
-    /// Minimum dimension (max(width, height)) required to trigger 64KB Sparse Tile slicing:
-    /// - 0: Force All (slices all supported textures >= 128x128)
-    /// - 1024: Aggressive Tiling (slices from 1024x1024 upwards)
-    /// - 2048: Standard AAA Threshold (default, slices 2K, 4K, 8K)
-    /// - 4096: High-Res Only (slices 4K, 8K)
     pub min_tiled_resolution: usize,
-
-    /// Minimum total 64KB tile count (standard + packed tail) required to retain tiled layout.
-    /// If total tiles generated is less than this count, packing automatically rolls back to Mip-Split.
     pub min_tiled_tile_count: u32,
 }
 
@@ -103,6 +184,7 @@ impl Default for PackerOptions {
             validate_chunks: true,
             max_partition_size: DEFAULT_MAX_PARTITION_SIZE,
             gacl: GaclFormatOverrides::default(),
+            ntc: NtcPackerOptions::default(),
             atg_profile: true,
             tiled_streaming: true,
             min_tiled_resolution: 2048,

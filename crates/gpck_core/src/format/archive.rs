@@ -25,8 +25,8 @@ bitflags::bitflags! {
         const IS_COMPRESSED   = 1 << 0;
         const ENCRYPTED_META  = 1 << 1;
         const DELETED         = 1 << 2;
-        const STREAMING       = 1 << 8;
-        const BOOT_TAIL       = 1 << 11; // 64KB Packed Mip Tail placed in Partition 0 (Boot)
+        const STREAMING       = 1 << 12; // Bit 12 (Disambiguated from resource types)
+        const BOOT_TAIL       = 1 << 13; // Bit 13 (Disambiguated from TYPE_NEURAL_TEXTURE)
     }
 }
 
@@ -38,16 +38,20 @@ pub const FLAG_STREAMING: u32 = ArchiveFlags::STREAMING.bits();
 pub const FLAG_BOOT_TAIL: u32 = ArchiveFlags::BOOT_TAIL.bits();
 
 pub const MASK_METHOD: u32 = 0x38;
+
+// Resource Container Types (Bits 6..11)
 pub const TYPE_TEXTURE: u32 = 1 << 6;
 pub const TYPE_MESHLET_CONTAINER: u32 = 1 << 7; // .gmesh
 pub const TYPE_DMM_CONTAINER: u32 = 1 << 8; // .gdmm (Displaced Micro-Meshes)
 pub const TYPE_DGF_CONTAINER: u32 = 1 << 9; // .dgf  (AMD Dense Geometry Format 128B)
 pub const TYPE_TILED_RESOURCE: u32 = 1 << 10; // 64KB Sparse Hardware Tiled Resource
-pub const MASK_ALIGNMENT: u32 = 0xFF000000;
-pub const SHIFT_ALIGNMENT: u32 = 24;
+pub const TYPE_NEURAL_TEXTURE: u32 = 1 << 11; // .gntc / .ntex (MiniDXNN / Neural Material)
 
 pub const MASK_GACL_TRANSFORM: u32 = 0x003F0000;
 pub const SHIFT_GACL_TRANSFORM: u32 = 16;
+
+pub const MASK_ALIGNMENT: u32 = 0xFF000000;
+pub const SHIFT_ALIGNMENT: u32 = 24;
 
 pub const TAG_BASE_GAME: u32 = 1 << 0;
 pub const TAG_HD_TEXTURES: u32 = 1 << 1;

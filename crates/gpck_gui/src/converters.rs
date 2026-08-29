@@ -4,7 +4,9 @@
 use crate::controller::get_all_entries_filtered;
 use crate::{BlockItemUI, FileItemUI};
 use gpck_core::compression::codecs::CompressionMethod;
-use gpck_core::format::archive::{FLAG_BOOT_TAIL, GameArchive, TYPE_TILED_RESOURCE};
+use gpck_core::format::archive::{
+    FLAG_BOOT_TAIL, GameArchive, TYPE_NEURAL_TEXTURE, TYPE_TILED_RESOURCE,
+};
 use gpck_core::gacl::GaclTransform;
 use gpck_core::graphics::dxgi_format::dxgi;
 use slint::{Color, SharedString};
@@ -84,7 +86,7 @@ pub fn generate_ui_elements_from_archive(
             Color::from_rgb_u8(255, 87, 34),
         ];
 
-        // 1. Generate standard file table rows
+        // Generate standard file table rows
         for e in &entries {
             let name = arch
                 .get_path_for_asset(e)
@@ -101,9 +103,12 @@ pub fn generate_ui_elements_from_archive(
             let width = (e.meta1 >> 16) & 0xFFFF;
             let height = e.meta1 & 0xFFFF;
             let is_tiled = (e.flags & TYPE_TILED_RESOURCE) != 0;
+            let is_neural = (e.flags & TYPE_NEURAL_TEXTURE) != 0 || ext == "GNTC" || ext == "NTEX";
             let dxgi_fmt = (e.meta2 >> 16) & 0xFF;
 
-            let format_str = if dxgi_fmt > 0 {
+            let format_str = if is_neural {
+                "GNTC".to_string()
+            } else if dxgi_fmt > 0 {
                 match dxgi_fmt {
                     dxgi::BC1_UNORM => "BC1u".to_string(),
                     dxgi::BC1_UNORM_SRGB => "BC1_sRGB".to_string(),
@@ -145,7 +150,9 @@ pub fn generate_ui_elements_from_archive(
                 ext
             };
 
-            let res_str = if width > 0 && height > 0 {
+            let res_str = if is_neural {
+                "Neural PBR".to_string()
+            } else if width > 0 && height > 0 {
                 if is_tiled {
                     let tile_count = e.meta2 & 0x0000FFFF;
                     if tile_count > 0 {
@@ -190,7 +197,7 @@ pub fn generate_ui_elements_from_archive(
         }
 
         // ====================================================================
-        // 2. Physical Disk Layout Sorting for VFS Block Visualizer
+        // Physical Disk Layout Sorting for VFS Block Visualizer
         // ====================================================================
         // Sorts strictly by physical `data_offset` on NVMe storage.
         // Guarantees Block 0..K represents Partition 0 Boot-Tails at the start of .gdat.

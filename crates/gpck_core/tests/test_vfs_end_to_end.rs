@@ -5,7 +5,7 @@ use gpck_core::compression::codecs::CompressionMethod;
 use gpck_core::crypto::aes_gcm::derive_key;
 use gpck_core::format::archive::TAG_BASE_GAME;
 use gpck_core::io::vfs::VirtualFileSystem;
-use gpck_core::packer::{AssetPacker, GaclFormatOverrides, PackerOptions};
+use gpck_core::packer::{AssetPacker, GaclFormatOverrides, NtcPackerOptions, PackerOptions};
 use std::collections::HashMap;
 use std::fs;
 
@@ -57,6 +57,7 @@ async fn test_vfs_package_encrypt_mount_and_stream() {
         validate_chunks: true,
         max_partition_size: 64 * 1024 * 1024,
         gacl: GaclFormatOverrides::default(),
+        ntc: NtcPackerOptions::default(),
         atg_profile: true,
         tiled_streaming: false,
         min_tiled_resolution: 0,

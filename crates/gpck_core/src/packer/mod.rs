@@ -1,9 +1,9 @@
 // crates/gpck_core/src/packer/mod.rs
 //! # Build-Time Asset Packaging Engine
 //!
-//! Modular asset packaging pipeline: discovery, texture conditioning,
-//! geometry meshlet clustering, 64KB sparse tile packaging, deduplicated chunking,
-//! streaming layout sorting, GDAT emission, and CHD Minimal Perfect Hashing.
+//! Modular asset packaging pipeline: asset discovery, texture conditioning (GACL & RDO),
+//! geometry meshlet clustering, 64KB hardware sparse tile packaging, deduplicated chunking,
+//! streaming layout sorting, GDAT emission, CHD Minimal Perfect Hashing, and neural texture bundling.
 
 pub mod chunker;
 pub mod discovery;
@@ -15,15 +15,20 @@ pub mod texture;
 pub mod tiler;
 pub mod types;
 
+#[cfg(feature = "neural-textures")]
+pub mod ntc_packer;
+
 // Public re-exports for the crate API
 pub use discovery::AssetDiscovery;
 pub use geometry::process_geometry_file;
+#[cfg(feature = "neural-textures")]
+pub use ntc_packer::NtcBundlePacker;
 pub use pipeline::PackingPipeline;
 pub use texture::{ProcessedFileParams, build_processed_file};
 pub use tiler::{D3D12_TILE_SIZE, TileSliceResult, TiledTexturePacker};
 pub use types::{
-    DEFAULT_CHUNK_SIZE, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, PackerOptions, PipGap,
-    PipTocEntry, ProcessedChunk, ProcessedFile,
+    DEFAULT_CHUNK_SIZE, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions,
+    PackerOptions, PbrSuffixConfig, PipGap, PipTocEntry, ProcessedChunk, ProcessedFile,
 };
 
 use crate::core::error::GpckResult;
@@ -34,11 +39,13 @@ use std::path::{Path, PathBuf};
 pub struct AssetPacker;
 
 impl AssetPacker {
+    /// Recursively scans files from a directory or single file path, producing a normalized virtual path map.
     #[inline(always)]
     pub fn build_file_map<P: AsRef<Path>>(input_path: P) -> GpckResult<HashMap<PathBuf, String>> {
         discovery::AssetDiscovery::build_file_map(input_path)
     }
 
+    /// Compresses and packages indexed files into a GPCK dual-file archive (.gtoc + .gdat).
     #[inline(always)]
     pub fn compress_files_to_archive<P: AsRef<Path>, F>(
         file_map: &HashMap<PathBuf, String>,
@@ -52,6 +59,7 @@ impl AssetPacker {
         pipeline::PackingPipeline::execute(file_map, output_path, options, log_fn)
     }
 
+    /// Builds an incremental delta patch against a reference base archive using Best-Fit Decreasing (BFD) layout.
     #[inline(always)]
     pub fn build_delta_patch<P: AsRef<Path>>(
         base_archive_path: P,

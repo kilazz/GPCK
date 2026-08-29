@@ -15,6 +15,7 @@ default = [
     "geometry",
     "crypto",
     "texture-decoders",
+    "neural-textures",
     "remote-cdn",
 ]
 
@@ -30,6 +31,9 @@ crypto = ["dep:aes-gcm", "dep:sha2", "dep:pbkdf2", "dep:hmac", "dep:rand"]
 
 # CPU Texture Decoding (image, image_dds)
 texture-decoders = ["dep:image", "dep:image_dds"]
+
+# NVIDIA RTX Neural Texture Compression (NTC)
+neural-textures = []
 
 # Remote CDN Chunk Streaming over HTTP/HTTPS
 remote-cdn = ["dep:reqwest"]
@@ -54,18 +58,18 @@ crossbeam-channel.workspace = true
 tokio.workspace = true
 reqwest = { workspace = true, optional = true }
 
-# Cryptography & Integrity (Optional: feature = "crypto")
+# Cryptography & Integrity
 aes-gcm = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 pbkdf2 = { workspace = true, optional = true }
 hmac = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
-# GPU & System Interop (Optional: feature = "gpu-vulkan")
+# GPU & System Interop
 ash = { workspace = true, optional = true }
 libloading.workspace = true
 
-# Graphics & Texture Decoding (Optional: feature = "texture-decoders")
+# Graphics & Texture Decoding
 image = { workspace = true, optional = true }
 image_dds = { workspace = true, optional = true }
 

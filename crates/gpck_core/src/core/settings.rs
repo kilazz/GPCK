@@ -16,8 +16,28 @@ pub struct AppSettings {
     pub validate_chunks: bool,
     pub atg_profile: bool,
     pub tiled_streaming: bool,
-    pub min_tiled_res_index: i32, // 0 = 2048+, 1 = 1024+, 2 = Force All (128+), 3 = 4096+
+    pub min_tiled_res_index: i32,
     pub min_tiled_tile_count: u32,
+
+    // MiniDXNN Native Neural Settings
+    pub ntc_enabled: bool,
+    pub ntc_target_bpp: f32,
+    pub ntc_encoding_index: i32, // 0 = Bilinear Grid, 1 = Positional, 2 = Raw UV
+    pub ntc_grid_res_index: i32, // 0 = 32x32, 1 = 64x64, 2 = 128x128
+    pub ntc_optimizer_index: i32, // 0 = Lion, 1 = Adam, 2 = SGD
+    pub ntc_quality_index: i32,  // 0 = 5 Epochs, 1 = 30 Epochs, 2 = 100 Epochs
+    pub ntc_auto_bundle: bool,
+    pub ntc_precompute_bc7_modes: bool,
+    pub ntc_wave_reduced_accum: bool,
+    pub ntc_inference_mode_index: i32, // 0 = DP4a Universal, 1 = LinAlg SM 6.10, 2 = CPU SIMD
+
+    // Customizable PBR Suffixes (Comma-separated)
+    pub pbr_suffix_albedo: String,
+    pub pbr_suffix_normal: String,
+    pub pbr_suffix_metallic: String,
+    pub pbr_suffix_roughness: String,
+    pub pbr_suffix_ao: String,
+    pub pbr_suffix_displacement: String,
 
     // GACL Settings
     pub gacl_auto_mode: bool,
@@ -78,8 +98,28 @@ impl Default for AppSettings {
             validate_chunks: true,
             atg_profile: true,
             tiled_streaming: true,
-            min_tiled_res_index: 0, // Default: 2048+
+            min_tiled_res_index: 0,
             min_tiled_tile_count: 8,
+
+            ntc_enabled: false,
+            ntc_target_bpp: 5.0,
+            ntc_encoding_index: 0,
+            ntc_grid_res_index: 1,
+            ntc_optimizer_index: 0,
+            ntc_quality_index: 1,
+            ntc_auto_bundle: true,
+            ntc_precompute_bc7_modes: true,
+            ntc_wave_reduced_accum: true,
+            ntc_inference_mode_index: 0,
+
+            // Smart PBR Suffix Defaults
+            pbr_suffix_albedo: "_diff, _albedo, _basecolor, _color, _col, _d, _alb".to_string(),
+            pbr_suffix_normal: "_ddn, _ddna, _normal, _norm, _nrm, _n, _nor".to_string(),
+            pbr_suffix_metallic: "_spec, _specular, _metal, _metallic, _metalness, _m, _met"
+                .to_string(),
+            pbr_suffix_roughness: "_gloss, _rough, _roughness, _r, _rgh".to_string(),
+            pbr_suffix_ao: "_ao, _ambient, _occlusion, _ambientocclusion".to_string(),
+            pbr_suffix_displacement: "_displ, _disp, _height, _h, _bump".to_string(),
 
             gacl_auto_mode: true,
             gacl_bc1_index: 0,
@@ -108,10 +148,10 @@ impl Default for AppSettings {
             staging_buffer_size_index: 2,
             default_queue_priority_index: 0,
 
-            cdn_cache_size_mb: 256, // Default 256 MB CDN chunk cache
+            cdn_cache_size_mb: 256,
 
             decondition_gacl_preview: true,
-            reconstruct_normal_z: false, // Default: Raw 2-channel display (toggleable via UI checkbox)
+            reconstruct_normal_z: false,
             show_tile_grid: false,
             tonemap_mode_index: 0,
             bg_mode_index: 0,

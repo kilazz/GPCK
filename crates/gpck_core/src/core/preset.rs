@@ -4,7 +4,8 @@
 use crate::compression::codecs::CompressionMethod;
 use crate::gacl::GaclTransform;
 use crate::packer::{
-    DEFAULT_CHUNK_SIZE, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, PackerOptions,
+    DEFAULT_CHUNK_SIZE, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions,
+    PackerOptions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub enum PackerPreset {
     #[default]
     GpuStreaming,
+    NeuralPbrNtc,
     MobileAndroid,
     MaxCompression,
     FastDevBuild,
@@ -22,6 +24,7 @@ pub enum PackerPreset {
 impl PackerPreset {
     pub const ALL_NAMES: &'static [&'static str] = &[
         "GPU Streaming (PC / DirectStorage)",
+        "Next-Gen Neural PBR (MiniDXNN / DP4a / 5 bpp)",
         "Mobile / Android (ASTC / ETC2 + LZ4)",
         "Maximum Compression (Distribution)",
         "Fast Dev Build (Iteration)",
@@ -31,7 +34,9 @@ impl PackerPreset {
 
     pub fn from_name(name: &str) -> Self {
         let lower = name.to_lowercase();
-        if lower.contains("mobile") || lower.contains("android") {
+        if lower.contains("neural") || lower.contains("minidxnn") || lower.contains("ntc") {
+            Self::NeuralPbrNtc
+        } else if lower.contains("mobile") || lower.contains("android") {
             Self::MobileAndroid
         } else if lower.contains("gpu") || lower.contains("directstorage") {
             Self::GpuStreaming
@@ -61,7 +66,7 @@ impl PackerPreset {
                 max_partition_size: 64 * 1024 * 1024,
                 atg_profile: true,
                 tiled_streaming: true,
-                min_tiled_resolution: 2048, // 2K/4K/8K Sparse Tiling Threshold
+                min_tiled_resolution: 2048,
                 min_tiled_tile_count: 8,
                 gacl: GaclFormatOverrides {
                     auto_mode: true,
@@ -74,6 +79,40 @@ impl PackerPreset {
                     rdo_bc5: false,
                     rdo_bc6h: false,
                     rdo_bc7: true,
+                    ..Default::default()
+                },
+                ntc: NtcPackerOptions {
+                    enabled: false,
+                    ..Default::default()
+                },
+            },
+            Self::NeuralPbrNtc => PackerOptions {
+                method: CompressionMethod::Zstd,
+                level: 9,
+                chunk_size: DEFAULT_CHUNK_SIZE,
+                enable_dedup: true,
+                key: key_bytes,
+                mip_split: true,
+                max_tail_dim: 128,
+                tags: 1,
+                validate_chunks: true,
+                max_partition_size: 64 * 1024 * 1024,
+                atg_profile: true,
+                tiled_streaming: true,
+                min_tiled_resolution: 1024,
+                min_tiled_tile_count: 4,
+                gacl: GaclFormatOverrides {
+                    enabled: true,
+                    auto_mode: true,
+                    ..Default::default()
+                },
+                ntc: NtcPackerOptions {
+                    enabled: true,
+                    target_bpp: 5.0,
+                    training_steps: 10000,
+                    auto_bundle_pbr: true,
+                    precompute_bc7_modes: true,
+                    stable_training: true,
                     ..Default::default()
                 },
             },
@@ -98,6 +137,7 @@ impl PackerPreset {
                     rdo_use_ycocg: false,
                     ..Default::default()
                 },
+                ntc: NtcPackerOptions::default(),
             },
             Self::MaxCompression => PackerOptions {
                 method: CompressionMethod::Zstd,
@@ -127,6 +167,7 @@ impl PackerPreset {
                     rdo_bc7: true,
                     ..Default::default()
                 },
+                ntc: NtcPackerOptions::default(),
             },
             Self::FastDevBuild => PackerOptions {
                 method: CompressionMethod::Lz4,
@@ -153,6 +194,7 @@ impl PackerPreset {
                     rdo_use_ycocg: false,
                     ..Default::default()
                 },
+                ntc: NtcPackerOptions::default(),
             },
             Self::SecureDelivery => PackerOptions {
                 method: CompressionMethod::Zstd,
@@ -170,6 +212,7 @@ impl PackerPreset {
                 min_tiled_resolution: 2048,
                 min_tiled_tile_count: 8,
                 gacl: GaclFormatOverrides::default(),
+                ntc: NtcPackerOptions::default(),
             },
             Self::Custom => PackerOptions::default(),
         }

@@ -224,6 +224,26 @@ component SettingsTab inherits ScrollView {
     in-out property <bool> tiled-streaming-enabled: true;
     in-out property <int> min-tiled-res-index: 0;
 
+    // MiniDXNN Native Neural Textures Properties
+    in-out property <bool> ntc-enabled: false;
+    in-out property <float> ntc-target-bpp: 5.0;
+    in-out property <int> ntc-encoding-index: 0;
+    in-out property <int> ntc-grid-res-index: 1;
+    in-out property <int> ntc-optimizer-index: 0;
+    in-out property <int> ntc-quality-index: 1;
+    in-out property <bool> ntc-auto-bundle: true;
+    in-out property <bool> ntc-precompute-bc7-modes: true;
+    in-out property <bool> ntc-wave-reduced-accum: true;
+    in-out property <int> ntc-inference-mode-index: 0;
+
+    // Suffix Rules
+    in-out property <string> pbr-suffix-albedo: "_diff, _albedo, _basecolor, _color, _col, _d";
+    in-out property <string> pbr-suffix-normal: "_ddn, _ddna, _normal, _norm, _nrm, _n";
+    in-out property <string> pbr-suffix-metal: "_spec, _specular, _metal, _metallic, _m";
+    in-out property <string> pbr-suffix-rough: "_gloss, _rough, _roughness, _r";
+    in-out property <string> pbr-suffix-ao: "_ao, _ambient, _occlusion";
+    in-out property <string> pbr-suffix-displ: "_displ, _disp, _height, _h";
+
     in-out property <bool> gacl-enabled: true;
     in-out property <bool> gacl-auto-mode: true;
     in-out property <int> gacl-bc1-index: 0;
@@ -287,9 +307,10 @@ component SettingsTab inherits ScrollView {
                 }
 
                 ComboBox {
-                    width: 360px;
+                    width: 440px;
                     model: [
                         "GPU Streaming (PC / DirectStorage)",
+                        "Next-Gen Neural PBR (MiniDXNN / DP4a / 5 bpp)",
                         "Mobile / Android (ASTC / ETC2 + LZ4)",
                         "Maximum Compression (Distribution)",
                         "Fast Dev Build (Iteration)",
@@ -404,8 +425,261 @@ component SettingsTab inherits ScrollView {
                 }
 
                 Card {
+                    title: "[NEURAL] Hardware GPU Neural Material Engine (MiniDXNN / DP4a)";
+                    header-color: #10B981;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            CheckBox {
+                                text: "Enable Neural Textures (MiniDXNN)";
+                                checked <=> root.ntc-enabled;
+                            }
+
+                            CheckBox {
+                                text: "Auto-Bundle PBR Materials";
+                                checked <=> root.ntc-auto-bundle;
+                                enabled: root.ntc-enabled;
+                            }
+                        }
+
+                        GridLayout {
+                            spacing: 8px;
+
+                            Row {
+                                Text {
+                                    text: "Input Encoding:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Bilinear Grid (Fast & Detailed)",
+                                        "Positional Frequencies (Fourier)",
+                                        "Identity / Raw Coordinates"
+                                    ];
+                                    current-index <=> root.ntc-encoding-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Grid / Latent Density:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Grid 64x64 (Fast / ~5.0 bpp)",
+                                        "Grid 128x128 (Balanced / ~8.0 bpp)",
+                                        "Grid 256x256 (High Quality / ~12.0 bpp)",
+                                        "Grid 512x512 (Ultra 4K Crisp / ~16.0 bpp)",
+                                        "Grid 1024x1024 (Extreme 4K Native / ~20.0 bpp)"
+                                    ];
+                                    current-index <=> root.ntc-grid-res-index;
+                                    enabled: root.ntc-enabled && root.ntc-encoding-index == 0;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "GPU Optimizer:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Lion (Sign Momentum — Recommended)",
+                                        "Adam (Adaptive Moments)",
+                                        "SGD (Stochastic Gradient)"
+                                    ];
+                                    current-index <=> root.ntc-optimizer-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Training Quality:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Fast (10 Epochs / Rapid Preview)",
+                                        "Balanced (30 Epochs — Standard)",
+                                        "High Quality (100 Epochs)"
+                                    ];
+                                    current-index <=> root.ntc-quality-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Inference Target:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Universal DP4a (AMD RDNA 2/3, RX6000+, Intel, GeForce)",
+                                        "DirectX 12 LinAlg Matrix (SM 6.10)",
+                                        "CPU Fallback (SIMD / Multi-Threaded)"
+                                    ];
+                                    current-index <=> root.ntc-inference-mode-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 12px;
+                            CheckBox {
+                                text: "Wave-Reduced Bias Accumulation (WaveActiveSum)";
+                                checked <=> root.ntc-wave-reduced-accum;
+                                enabled: root.ntc-enabled;
+                            }
+
+                            CheckBox {
+                                text: "Precompute BC7 Mode Bitmaps (<0.05ms Transcode)";
+                                checked <=> root.ntc-precompute-bc7-modes;
+                                enabled: root.ntc-enabled;
+                            }
+                        }
+
+                        Rectangle {
+                            background: #141417;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: #27272F;
+
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+
+                                Text {
+                                    text: "Customizable PBR Suffix Rules (CryEngine / Unreal / Unity):";
+                                    color: #38BDF8;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                }
+
+                                GridLayout {
+                                    spacing: 6px;
+
+                                    Row {
+                                        Text {
+                                            text: "Albedo:";
+                                            color: #9CA3AF;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-albedo;
+                                            font-size: 11px;
+                                        }
+
+                                        Text {
+                                            text: "Normal:";
+                                            color: #9CA3AF;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-normal;
+                                            font-size: 11px;
+                                        }
+                                    }
+
+                                    Row {
+                                        Text {
+                                            text: "Metal/Spec:";
+                                            color: #9CA3AF;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-metal;
+                                            font-size: 11px;
+                                        }
+
+                                        Text {
+                                            text: "Rough/Gloss:";
+                                            color: #9CA3AF;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-rough;
+                                            font-size: 11px;
+                                        }
+                                    }
+
+                                    Row {
+                                        Text {
+                                            text: "AO:";
+                                            color: #9CA3AF;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-ao;
+                                            font-size: 11px;
+                                        }
+
+                                        Text {
+                                            text: "Displacement:";
+                                            color: #9CA3AF;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-displ;
+                                            font-size: 11px;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row {
+                Card {
                     title: "[STREAMING] DDS Texture Streaming & 64KB Sparse Tiles";
-                    header-color: #34D399;
+                    header-color: #38BDF8;
 
                     VerticalLayout {
                         spacing: 10px;
@@ -468,9 +742,7 @@ component SettingsTab inherits ScrollView {
                         }
                     }
                 }
-            }
 
-            Row {
                 Card {
                     title: "[GACL] Texture Conditioning Matrix";
                     header-color: #F59E0B;
@@ -708,7 +980,9 @@ component SettingsTab inherits ScrollView {
                         }
                     }
                 }
+            }
 
+            Row {
                 Card {
                     title: "[GPU] DirectStorage 1.4 & Hardware Offload";
                     header-color: #A855F7;
@@ -763,9 +1037,7 @@ component SettingsTab inherits ScrollView {
                         }
                     }
                 }
-            }
 
-            Row {
                 Card {
                     title: "[SECURITY] Metadata Encryption (AES-256-GCM)";
                     header-color: #EF4444;
@@ -798,10 +1070,13 @@ component SettingsTab inherits ScrollView {
                         }
                     }
                 }
+            }
 
+            Row {
                 Card {
                     title: "[BENCHMARK] Hardware & Pipeline Diagnostics";
                     header-color: #38BDF8;
+                    colspan: 2;
 
                     VerticalLayout {
                         spacing: 8px;
@@ -894,6 +1169,26 @@ export component AppWindow inherits Window {
     in-out property <bool> atg-profile <=> settings-tab.atg-profile;
     in-out property <bool> tiled-streaming-enabled <=> settings-tab.tiled-streaming-enabled;
     in-out property <int> min-tiled-res-index <=> settings-tab.min-tiled-res-index;
+
+    // MiniDXNN Neural Properties Bridge
+    in-out property <bool> ntc-enabled <=> settings-tab.ntc-enabled;
+    in-out property <float> ntc-target-bpp <=> settings-tab.ntc-target-bpp;
+    in-out property <int> ntc-encoding-index <=> settings-tab.ntc-encoding-index;
+    in-out property <int> ntc-grid-res-index <=> settings-tab.ntc-grid-res-index;
+    in-out property <int> ntc-optimizer-index <=> settings-tab.ntc-optimizer-index;
+    in-out property <int> ntc-quality-index <=> settings-tab.ntc-quality-index;
+    in-out property <bool> ntc-auto-bundle <=> settings-tab.ntc-auto-bundle;
+    in-out property <bool> ntc-precompute-bc7-modes <=> settings-tab.ntc-precompute-bc7-modes;
+    in-out property <bool> ntc-wave-reduced-accum <=> settings-tab.ntc-wave-reduced-accum;
+    in-out property <int> ntc-inference-mode-index <=> settings-tab.ntc-inference-mode-index;
+
+    // Suffix Rules Bridge
+    in-out property <string> pbr-suffix-albedo <=> settings-tab.pbr-suffix-albedo;
+    in-out property <string> pbr-suffix-normal <=> settings-tab.pbr-suffix-normal;
+    in-out property <string> pbr-suffix-metal <=> settings-tab.pbr-suffix-metal;
+    in-out property <string> pbr-suffix-rough <=> settings-tab.pbr-suffix-rough;
+    in-out property <string> pbr-suffix-ao <=> settings-tab.pbr-suffix-ao;
+    in-out property <string> pbr-suffix-displ <=> settings-tab.pbr-suffix-displ;
 
     in-out property <bool> gacl-enabled <=> settings-tab.gacl-enabled;
     in-out property <bool> gacl-auto-mode <=> settings-tab.gacl-auto-mode;
@@ -1063,16 +1358,15 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Main Content Area
+        // Main Viewports
         Rectangle {
             background: #141417;
 
-            // ================= 0: Explorer View with Resizable Splitter =================
+            // ================= 0: Explorer View =================
             if root.active-tab == 0: HorizontalLayout {
                 padding: 10px;
                 spacing: 0px;
 
-                // Left Pane: Expanded 10-Column File Table with Keyboard & Mouse-Wheel Scrolling
                 Rectangle {
                     background: #1A1A1E;
                     border-radius: 4px;
@@ -1133,7 +1427,6 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // Table Header (10 Columns)
                             Rectangle {
                                 background: #23232B;
                                 height: 28px;
@@ -1267,7 +1560,6 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // Fully Scrollable Table Viewport
                             ScrollView {
                                 VerticalLayout {
                                     alignment: start;
@@ -1316,7 +1608,7 @@ export component AppWindow inherits Window {
                                             Text {
                                                 width: 6%;
                                                 text: item.format-str;
-                                                color: item.format-str == "HIGHMIPS" ? #38BDF8 : (item.format-str == "DDS" ? #60A5FA : #A1A1AA);
+                                                color: item.format-str == "GNTC" ? #10B981 : (item.format-str == "HIGHMIPS" ? #38BDF8 : (item.format-str == "DDS" ? #60A5FA : #A1A1AA));
                                                 font-size: 11px;
                                                 font-weight: 600;
                                                 vertical-alignment: center;
@@ -1393,7 +1685,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Interactive Draggable Splitter Handle
+                // Splitter Handle
                 Rectangle {
                     width: 8px;
                     background: splitter-touch.pressed ? #38BDF8 : (splitter-touch.has-hover ? #60A5FA : transparent);
@@ -1415,7 +1707,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Right Pane: Inspector & Interactive Zoom/Pan Preview Viewport
+                // Right Pane: Preview
                 Rectangle {
                     background: #1A1A1E;
                     border-radius: 4px;
@@ -1508,7 +1800,7 @@ export component AppWindow inherits Window {
                                 ToolbarSeparator { }
 
                                 ComboBox {
-                                    width: 90px;
+                                    width: 140px;
                                     model: root.available-mips;
                                     current-index <=> root.selected-mip-level;
                                     selected(val) => { root.mip-level-changed(root.selected-mip-level); }
@@ -1548,7 +1840,6 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Optimized Viewport Container (GPU Scissor & Clamped Pan-Zoom)
                         Rectangle {
                             background: root.bg-mode-index == 2 ? #000000 : (root.bg-mode-index == 3 ? #FFFFFF : #141417);
                             border-radius: 4px;
@@ -1584,7 +1875,7 @@ export component AppWindow inherits Window {
                             if root.selected-file-index >= 0 && root.is-preview-loading: VerticalLayout {
                                 alignment: center;
                                 Text {
-                                    text: "Decoding Texture (De-tiling & GPU Unshuffle)...";
+                                    text: "Decoding Texture (Native 1:1 Neural Synthesis)...";
                                     color: #38BDF8;
                                     font-size: 12px;
                                     font-weight: 600;
@@ -1651,7 +1942,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // ================= 1: 2D Matrix Memory Map & Keyboard Navigation =================
+            // ================= 1: 2D Memory Map View =================
             if root.active-tab == 1: Rectangle {
                 background: #1A1A1E;
                 border-radius: 4px;
@@ -1714,7 +2005,6 @@ export component AppWindow inherits Window {
                         padding: 14px;
                         spacing: 12px;
 
-                        // Top Bar: Stats & Color Toggle
                         HorizontalLayout {
                             alignment: space-between;
 
@@ -1742,7 +2032,6 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // 2D High-Density Memory Map Matrix (Scrolls Vertically)
                         Rectangle {
                             background: #141417;
                             border-radius: 4px;
@@ -1766,7 +2055,6 @@ export component AppWindow inherits Window {
                                         border-width: root.selected-block-index == b-idx ? 2px : (block-touch.has-hover ? 1px : 0px);
                                         border-color: root.selected-block-index == b-idx ? #00E5FF : #FFFFFF;
 
-                                        // Boot Tail Golden Indicator Dot
                                         if block.is-boot_tail: Rectangle {
                                             x: 3px;
                                             y: 3px;
@@ -1788,7 +2076,6 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Bottom Panel: Selected Chunk Hardware & Layout Inspector
                         Rectangle {
                             background: #1E1E24;
                             border-radius: 4px;

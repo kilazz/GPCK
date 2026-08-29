@@ -7,7 +7,7 @@ use gpck_core::core::{crash_handler, logger};
 use gpck_core::crypto::aes_gcm::derive_key;
 use gpck_core::format::archive::{GameArchive, TAG_BASE_GAME};
 use gpck_core::packer::{
-    AssetPacker, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, PackerOptions,
+    AssetPacker, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions, PackerOptions,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -126,6 +126,7 @@ fn main() -> Result<()> {
                 validate_chunks: validate,
                 max_partition_size: partition_size,
                 gacl: GaclFormatOverrides::default(),
+                ntc: NtcPackerOptions::default(),
                 atg_profile: atg,
                 tiled_streaming: tiled,
                 min_tiled_resolution: min_tiled_res,

@@ -130,27 +130,39 @@ fn main() {
     fs::create_dir_all(&target_shaders_dir).ok();
     fs::create_dir_all(&d3d12_headers_dir).ok();
 
-    // Automatically build and execute zstdgpu_srt_tool to generate SRT structures
+    // Build and execute zstdgpu_srt_tool to generate SRT structures
     if let Some(zstdgpu_root) = resolve_external_path(&env, "external/DirectStorage/zstd/zstdgpu") {
         ensure_zstdgpu_generated_headers(&env, &zstdgpu_root);
         sync_zstdgpu_headers_for_shaders(&env, &zstdgpu_root);
     }
 
-    // Compile D3D12 C-Headers
+    // Compile D3D12 C-Headers for ZstdGPU
     generate_d3d12_zstd_headers(&env, &env.dxc_compiler, &d3d12_headers_dir);
 
     // Build native C++ static libraries (GDeflate / Brotli-G / ZstdGPU)
     build_static_compression_libraries(&env, &d3d12_headers_dir);
 
-    // 1. Compile all HLSL compute shaders to SPIR-V for Vulkan Compute
+    // Compile all HLSL compute shaders to SPIR-V for Vulkan Compute
     compile_spirv_and_generate_registry(&env, &target_shaders_dir);
 
-    // 2. Compile all HLSL compute shaders to native DXIL (SM 6.6) for DirectX 12
+    // Compile all HLSL compute shaders to native DXIL (SM 6.6) for DirectX 12
     compile_dxil_and_generate_registry(&env, &target_shaders_dir);
 
     // Copy DirectStorage and D3D12 DLLs on Windows
     #[cfg(target_os = "windows")]
     copy_windows_dlls(&env);
+}
+
+fn resolve_external_path(env: &SdkEnvironment, subpath: &str) -> Option<PathBuf> {
+    let local = env.manifest_dir.join(subpath);
+    if local.exists() {
+        return Some(local);
+    }
+    let workspace = env.workspace_root.join(subpath);
+    if workspace.exists() {
+        return Some(workspace);
+    }
+    None
 }
 
 fn ensure_zstdgpu_generated_headers(env: &SdkEnvironment, zstdgpu_root: &Path) {
@@ -230,7 +242,6 @@ fn ensure_zstdgpu_generated_headers(env: &SdkEnvironment, zstdgpu_root: &Path) {
     }
 }
 
-/// Copies zstdgpu header files and generated SRT structures to shaders/ and zstdgpu/
 fn sync_zstdgpu_headers_for_shaders(env: &SdkEnvironment, zstdgpu_root: &Path) {
     let shaders_dir = env.manifest_dir.join("shaders");
     if !shaders_dir.exists() {
@@ -277,22 +288,6 @@ fn sync_zstdgpu_headers_for_shaders(env: &SdkEnvironment, zstdgpu_root: &Path) {
     }
 }
 
-// ============================================================================
-// Shader Compilation & Registry Generators
-// ============================================================================
-
-fn resolve_external_path(env: &SdkEnvironment, subpath: &str) -> Option<PathBuf> {
-    let local = env.manifest_dir.join(subpath);
-    if local.exists() {
-        return Some(local);
-    }
-    let workspace = env.workspace_root.join(subpath);
-    if workspace.exists() {
-        return Some(workspace);
-    }
-    None
-}
-
 fn detect_entry_point(path: &Path) -> &'static str {
     if let Ok(content) = fs::read_to_string(path)
         && (content.contains("void CSMain(") || content.contains("void CSMain ("))
@@ -317,6 +312,7 @@ fn compile_spirv_and_generate_registry(env: &SdkEnvironment, target_shaders_dir:
     let local_gacl_shaders = env.manifest_dir.join("shaders/GACL");
     let local_gdeflate_shaders = env.manifest_dir.join("shaders/GDeflate");
     let local_geometry_shaders = env.manifest_dir.join("shaders/Geometry");
+    let local_ntc_shaders = env.manifest_dir.join("shaders/NTC");
 
     if shaders_dir.exists() {
         let mut hlsl_files = Vec::new();
@@ -371,7 +367,9 @@ fn compile_spirv_and_generate_registry(env: &SdkEnvironment, target_shaders_dir:
                 .arg("-I")
                 .arg(&local_gdeflate_shaders)
                 .arg("-I")
-                .arg(&local_geometry_shaders);
+                .arg(&local_geometry_shaders)
+                .arg("-I")
+                .arg(&local_ntc_shaders);
 
             if let Some(ref zroot) = zstdgpu_root {
                 cmd.arg("-I").arg(zroot);
@@ -466,6 +464,7 @@ fn compile_dxil_and_generate_registry(env: &SdkEnvironment, target_shaders_dir: 
     let local_gacl_shaders = env.manifest_dir.join("shaders/GACL");
     let local_gdeflate_shaders = env.manifest_dir.join("shaders/GDeflate");
     let local_geometry_shaders = env.manifest_dir.join("shaders/Geometry");
+    let local_ntc_shaders = env.manifest_dir.join("shaders/NTC");
 
     if shaders_dir.exists() {
         let mut hlsl_files = Vec::new();
@@ -502,7 +501,9 @@ fn compile_dxil_and_generate_registry(env: &SdkEnvironment, target_shaders_dir: 
                 .arg("-I")
                 .arg(&local_gdeflate_shaders)
                 .arg("-I")
-                .arg(&local_geometry_shaders);
+                .arg(&local_geometry_shaders)
+                .arg("-I")
+                .arg(&local_ntc_shaders);
 
             if let Some(ref zroot) = zstdgpu_root {
                 cmd.arg("-I").arg(zroot);
@@ -554,10 +555,6 @@ fn compile_dxil_and_generate_registry(env: &SdkEnvironment, target_shaders_dir: 
     writeln!(f, "    }}").unwrap();
     writeln!(f, "}}").unwrap();
 }
-
-// ============================================================================
-// Native C++ Static Library Linker
-// ============================================================================
 
 fn generate_d3d12_zstd_headers(env: &SdkEnvironment, dxc: &Path, out_headers_dir: &Path) {
     let zstdgpu_root = match resolve_external_path(env, "external/DirectStorage/zstd/zstdgpu") {
@@ -728,7 +725,6 @@ fn build_static_compression_libraries(env: &SdkEnvironment, d3d12_headers_dir: &
                 has_cpp_sources = true;
             }
 
-            // Only compile core C sources (common, dec, enc) - skip tools/fuzz/research
             let brotli_c_dir = bg_root.join("external/brotli/c");
             if brotli_c_dir.exists() {
                 for sub in &["common", "dec", "enc"] {
@@ -792,7 +788,7 @@ fn add_c_files_recursive(build: &mut cc::Build, dir: &Path) {
             let path = entry.path();
             if path.is_dir() {
                 add_c_files_recursive(build, &path);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("c") {
+            } else if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("c") {
                 build.file(&path);
             }
         }

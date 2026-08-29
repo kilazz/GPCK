@@ -10,7 +10,9 @@ use crate::gpu::directstorage::{GpuDirectStorage, QueuePriority};
 #[cfg(windows)]
 use crate::gpu::directstorage_sys::*;
 use crate::gpu::tile_pool::{TileKey, TilePoolManager};
-use crate::packer::{AssetPacker, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, PackerOptions};
+use crate::packer::{
+    AssetPacker, DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions, PackerOptions,
+};
 use rayon::prelude::*;
 use std::fmt::Write;
 use std::fs;
@@ -96,6 +98,7 @@ pub fn run_sector_burst_suite(out: &mut String) -> GpckResult<()> {
         validate_chunks: true,
         max_partition_size: DEFAULT_MAX_PARTITION_SIZE,
         gacl: GaclFormatOverrides::default(),
+        ntc: NtcPackerOptions::default(),
         atg_profile: true,
         tiled_streaming: true,
         min_tiled_resolution: 2048,

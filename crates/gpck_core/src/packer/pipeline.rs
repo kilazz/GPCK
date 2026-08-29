@@ -1,11 +1,16 @@
 // crates/gpck_core/src/packer/pipeline.rs
-//! # Staged Asset Packaging Pipeline & 3-Tier NVMe Layout Emitter
+//! # Staged Asset Packaging Pipeline & PBR Material Auto-Clustering
 
 use super::chunker;
 use super::emitter;
+use super::ntc_packer::NtcBundlePacker;
 use super::texture;
-use super::types::{DEFAULT_MAX_PARTITION_SIZE, PackerOptions, PipGap, PipTocEntry, ProcessedFile};
+use super::types::{
+    DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions, PackerOptions, PipGap,
+    PipTocEntry, ProcessedFile,
+};
 use crate::compression::codecs::CompressionMethod;
+use crate::compression::ntc::NtcPbrMaterialBundle;
 use crate::core::error::{GpckError, GpckResult};
 use crate::format::archive::{FLAG_BOOT_TAIL, TAG_BASE_GAME};
 use crossbeam_channel::bounded;
@@ -16,6 +21,18 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 pub struct PackingPipeline;
+
+#[derive(Default, Debug)]
+struct PbrMaterialSlot {
+    base_rel_path: String,
+    albedo_path: Option<PathBuf>,
+    normal_path: Option<PathBuf>,
+    ddna_path: Option<PathBuf>,
+    spec_or_metal_path: Option<PathBuf>,
+    roughness_or_gloss_path: Option<PathBuf>,
+    ao_path: Option<PathBuf>,
+    displacement_path: Option<PathBuf>,
+}
 
 impl PackingPipeline {
     pub fn execute<P: AsRef<Path>, F>(
@@ -31,22 +48,57 @@ impl PackingPipeline {
         let gtoc_path = output_ref.with_extension("gtoc");
         let gdat_path = output_ref.with_extension("gdat");
 
-        let mut small_files = Vec::new();
-        let mut large_files = Vec::new();
-        let allow_grouping = options.method != CompressionMethod::Store;
+        let mut pending_files: Vec<(PathBuf, String)> = file_map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
 
-        for (abs_p, rel_p) in file_map {
-            if let Ok(meta) = std::fs::metadata(abs_p) {
-                if allow_grouping && meta.len() < 64 * 1024 {
-                    small_files.push((abs_p.clone(), rel_p.clone()));
-                } else {
-                    large_files.push((abs_p.clone(), rel_p.clone()));
+        let mut all_processed_files: Vec<ProcessedFile> = Vec::new();
+
+        // ====================================================================
+        // PBR Material Auto-Clustering Pass (.gntc Bundling)
+        // ====================================================================
+        if options.ntc.enabled && options.ntc.auto_bundle_pbr {
+            let (pbr_bundles, remaining) = Self::cluster_pbr_materials(&pending_files, options);
+            pending_files = remaining;
+
+            for bundle_slot in pbr_bundles {
+                let has_ddna = bundle_slot.ddna_path.is_some();
+                log_fn(&format!(
+                    "[Neural PBR] Bundling material: {}.gntc{}",
+                    bundle_slot.base_rel_path,
+                    if has_ddna {
+                        " (CryEngine DDNA detected)"
+                    } else {
+                        ""
+                    }
+                ));
+
+                if let Ok(processed_gntc) = Self::pack_clustered_material(&bundle_slot, options) {
+                    all_processed_files.push(processed_gntc);
                 }
             }
         }
 
-        // 1. Process Large & Tiled Files in Parallel across Rayon Workers
-        let mut all_processed_files: Vec<ProcessedFile> = large_files
+        // ====================================================================
+        // Classify Remaining Files (Standalone Textures, LUTs, Meshes)
+        // ====================================================================
+        let mut small_files = Vec::new();
+        let mut large_files = Vec::new();
+        let allow_grouping = options.method != CompressionMethod::Store;
+
+        for (abs_p, rel_p) in pending_files {
+            if let Ok(meta) = std::fs::metadata(&abs_p) {
+                if allow_grouping && meta.len() < 64 * 1024 {
+                    small_files.push((abs_p, rel_p));
+                } else {
+                    large_files.push((abs_p, rel_p));
+                }
+            }
+        }
+
+        // Process Large & Standalone Textures in Parallel
+        let processed_standalone: Vec<ProcessedFile> = large_files
             .par_iter()
             .map(|(abs_path, rel_path)| texture::process_file(abs_path, rel_path, options))
             .filter_map(|res| match res {
@@ -59,7 +111,9 @@ impl PackingPipeline {
             .flatten()
             .collect();
 
-        // 2. Process Small File Groups into Super-Chunks
+        all_processed_files.extend(processed_standalone);
+
+        // Process Small File Groups into Super-Chunks
         if !small_files.is_empty() {
             let (small_tx, small_rx) = crossbeam_channel::unbounded();
             chunker::process_small_file_groups(&small_files, &small_tx, options)?;
@@ -70,17 +124,15 @@ impl PackingPipeline {
         }
 
         // ====================================================================
-        // 3. Strict 3-Tier NVMe Streaming Layout Sorting
+        // Strict 3-Tier NVMe Streaming Layout Sorting
         // ====================================================================
-        // Guarantees all Boot-Tail mips and startup metadata are physically placed
-        // at Block 0..K (Partition 0 at the very start of .gdat) for sub-100ms startup.
         all_processed_files.sort_by(|a, b| {
             let is_tail_a = (a.flags & FLAG_BOOT_TAIL) != 0 || a.original_path.ends_with(".tail");
             let is_tail_b = (b.flags & FLAG_BOOT_TAIL) != 0 || b.original_path.ends_with(".tail");
 
             // Tier 1: Boot Tails MUST be placed first (Partition 0)
             if is_tail_a != is_tail_b {
-                return is_tail_b.cmp(&is_tail_a); // true comes before false
+                return is_tail_b.cmp(&is_tail_a);
             }
 
             let is_highmips_a = a.original_path.ends_with(".highmips");
@@ -88,14 +140,14 @@ impl PackingPipeline {
 
             // Tier 3: Highmips placed last (Soft streaming queue)
             if is_highmips_a != is_highmips_b {
-                return is_highmips_a.cmp(&is_highmips_b); // false before true
+                return is_highmips_a.cmp(&is_highmips_b);
             }
 
             // Tier 2: Deterministic alphanumeric path ordering
             a.original_path.cmp(&b.original_path)
         });
 
-        // 4. Stream Sorted Layout into GDAT Writer
+        // Stream Sorted Layout into GDAT Writer
         let (tx, rx) = bounded::<ProcessedFile>(128);
         let writer_handle = emitter::spawn_gdat_writer(
             gdat_path,
@@ -115,9 +167,184 @@ impl PackingPipeline {
             .join()
             .map_err(|_| GpckError::InvalidFormat("GDAT writer thread panicked".to_string()))??;
 
-        // 5. Write Master Table of Contents (TOC)
+        // Write Master Table of Contents (TOC)
         processed_files.sort_by(|a, b| a.original_path.cmp(&b.original_path));
         emitter::write_master_toc(&processed_files, &gtoc_path, options.key)
+    }
+
+    /// Clusters loose PBR maps using customizable suffix rules and CryEngine DDNA detection.
+    fn cluster_pbr_materials(
+        files: &[(PathBuf, String)],
+        options: &PackerOptions,
+    ) -> (Vec<PbrMaterialSlot>, Vec<(PathBuf, String)>) {
+        let mut groups: HashMap<String, PbrMaterialSlot> = HashMap::new();
+        let mut consumed_indices = std::collections::HashSet::new();
+
+        let sfx = &options.ntc.pbr_suffixes;
+
+        let mut rule_list: Vec<(&str, u8)> = Vec::new();
+        rule_list.push(("_ddna", 6));
+
+        for s in &sfx.albedo {
+            rule_list.push((s.as_str(), 0));
+        }
+        for s in &sfx.normal {
+            if s != "_ddna" {
+                rule_list.push((s.as_str(), 1));
+            }
+        }
+        for s in &sfx.metallic {
+            rule_list.push((s.as_str(), 2));
+        }
+        for s in &sfx.roughness {
+            rule_list.push((s.as_str(), 3));
+        }
+        for s in &sfx.ao {
+            rule_list.push((s.as_str(), 4));
+        }
+        for s in &sfx.displacement {
+            rule_list.push((s.as_str(), 5));
+        }
+
+        // Sort suffix rules by length descending so longer matching suffixes take priority
+        rule_list.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
+
+        for (idx, (abs_path, rel_path)) in files.iter().enumerate() {
+            let lower = rel_path.to_lowercase();
+            if !lower.ends_with(".dds") && !lower.ends_with(".png") && !lower.ends_with(".tga") {
+                continue;
+            }
+
+            let stem = rel_path.rsplit('.').next_back().unwrap_or(rel_path);
+            let lower_stem = stem.to_lowercase();
+
+            for &(suffix, map_type) in &rule_list {
+                let trimmed_suffix = suffix.trim();
+                if !trimmed_suffix.is_empty() && lower_stem.ends_with(trimmed_suffix) {
+                    let base_name = &stem[..stem.len() - trimmed_suffix.len()];
+                    let entry =
+                        groups
+                            .entry(base_name.to_string())
+                            .or_insert_with(|| PbrMaterialSlot {
+                                base_rel_path: base_name.to_string(),
+                                ..Default::default()
+                            });
+
+                    match map_type {
+                        0 => entry.albedo_path = Some(abs_path.clone()),
+                        1 => entry.normal_path = Some(abs_path.clone()),
+                        2 => entry.spec_or_metal_path = Some(abs_path.clone()),
+                        3 => entry.roughness_or_gloss_path = Some(abs_path.clone()),
+                        4 => entry.ao_path = Some(abs_path.clone()),
+                        5 => entry.displacement_path = Some(abs_path.clone()),
+                        6 => {
+                            entry.ddna_path = Some(abs_path.clone());
+                            if entry.normal_path.is_none() {
+                                entry.normal_path = Some(abs_path.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    consumed_indices.insert(idx);
+                    break;
+                }
+            }
+        }
+
+        let mut valid_bundles = Vec::new();
+        let mut unclustered = Vec::new();
+
+        for (base_name, slot) in groups {
+            let mut channel_count = 0;
+            if slot.albedo_path.is_some() {
+                channel_count += 1;
+            }
+            if slot.normal_path.is_some() || slot.ddna_path.is_some() {
+                channel_count += 1;
+            }
+            if slot.spec_or_metal_path.is_some() {
+                channel_count += 1;
+            }
+            if slot.roughness_or_gloss_path.is_some() || slot.ddna_path.is_some() {
+                channel_count += 1;
+            }
+            if slot.ao_path.is_some() {
+                channel_count += 1;
+            }
+
+            if channel_count >= 2 {
+                valid_bundles.push(slot);
+            } else {
+                for (idx, (p, r)) in files.iter().enumerate() {
+                    if r.starts_with(&base_name) && consumed_indices.contains(&idx) {
+                        unclustered.push((p.clone(), r.clone()));
+                    }
+                }
+            }
+        }
+
+        for (idx, item) in files.iter().enumerate() {
+            if !consumed_indices.contains(&idx) {
+                unclustered.push(item.clone());
+            }
+        }
+
+        (valid_bundles, unclustered)
+    }
+
+    /// Reads raw channels from clustered maps and encodes into a .gntc ProcessedFile
+    fn pack_clustered_material(
+        slot: &PbrMaterialSlot,
+        options: &PackerOptions,
+    ) -> GpckResult<ProcessedFile> {
+        let width = 2048u32;
+        let height = 2048u32;
+
+        let albedo = slot
+            .albedo_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok());
+
+        let normal = if let Some(ref ddna_p) = slot.ddna_path {
+            std::fs::read(ddna_p).ok()
+        } else {
+            slot.normal_path
+                .as_ref()
+                .and_then(|p| std::fs::read(p).ok())
+        };
+
+        let metallic = slot
+            .spec_or_metal_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok());
+
+        let roughness = if let Some(ref rgh_p) = slot.roughness_or_gloss_path {
+            std::fs::read(rgh_p).ok()
+        } else if let Some(ref ddna_p) = slot.ddna_path {
+            std::fs::read(ddna_p).ok()
+        } else {
+            None
+        };
+
+        let ao = slot.ao_path.as_ref().and_then(|p| std::fs::read(p).ok());
+
+        let mut bundle = NtcPbrMaterialBundle::new(width, height);
+        // Pass the entire raw DDS vectors directly (do not slice raw bytes!)
+        bundle.albedo = albedo;
+        bundle.normal = normal;
+        bundle.metallic = metallic;
+        bundle.roughness = roughness;
+        bundle.ao = ao;
+
+        let target_rel_path = format!("{}.gntc", slot.base_rel_path);
+        NtcBundlePacker::pack_pbr_bundle(
+            &bundle,
+            &target_rel_path,
+            options,
+            Some(30),
+            Some(options.ntc.target_bpp),
+        )
     }
 
     pub fn execute_delta_patch<P: AsRef<Path>>(
@@ -158,7 +385,8 @@ impl PackingPipeline {
             tags: TAG_BASE_GAME,
             validate_chunks: true,
             max_partition_size: DEFAULT_MAX_PARTITION_SIZE,
-            gacl: super::types::GaclFormatOverrides::default(),
+            gacl: GaclFormatOverrides::default(),
+            ntc: NtcPackerOptions::default(),
             atg_profile: false,
             tiled_streaming: false,
             min_tiled_resolution: 0,

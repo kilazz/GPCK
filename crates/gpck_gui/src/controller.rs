@@ -13,7 +13,9 @@ use gpck_core::core::settings::{self, AppSettings};
 use gpck_core::crypto::aes_gcm::derive_key;
 use gpck_core::format::archive::{FLAG_DELETED, FileEntry, GameArchive};
 use gpck_core::io::extract::extract_asset_recombined;
-use gpck_core::packer::{AssetPacker, GaclFormatOverrides, PackerOptions};
+use gpck_core::packer::{
+    AssetPacker, GaclFormatOverrides, NtcPackerOptions, PackerOptions, PbrSuffixConfig,
+};
 use slint::{ComponentHandle, Image, ModelRc, SharedPixelBuffer, SharedString, VecModel};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -52,6 +54,13 @@ pub fn create_checkerboard_image(
     }
 
     Image::from_rgba8(pixel_buffer)
+}
+
+fn parse_suffix_list(s: &str) -> Vec<String> {
+    s.split(',')
+        .map(|item| item.trim().to_lowercase())
+        .filter(|item| !item.is_empty())
+        .collect()
 }
 
 impl GuiController {
@@ -219,10 +228,11 @@ impl GuiController {
             if let Some(ui) = ui_weak.upgrade() {
                 let preset = match idx {
                     0 => PackerPreset::GpuStreaming,
-                    1 => PackerPreset::MobileAndroid,
-                    2 => PackerPreset::MaxCompression,
-                    3 => PackerPreset::FastDevBuild,
-                    4 => PackerPreset::SecureDelivery,
+                    1 => PackerPreset::NeuralPbrNtc,
+                    2 => PackerPreset::MobileAndroid,
+                    3 => PackerPreset::MaxCompression,
+                    4 => PackerPreset::FastDevBuild,
+                    5 => PackerPreset::SecureDelivery,
                     _ => PackerPreset::Custom,
                 };
 
@@ -247,6 +257,13 @@ impl GuiController {
                 ui.set_mip_split_enabled(opts.mip_split);
                 ui.set_gacl_enabled(opts.gacl.enabled);
                 ui.set_gacl_auto_mode(opts.gacl.auto_mode);
+
+                // MiniDXNN Options Bridge
+                ui.set_ntc_enabled(opts.ntc.enabled);
+                ui.set_ntc_target_bpp(opts.ntc.target_bpp);
+                ui.set_ntc_auto_bundle(opts.ntc.auto_bundle_pbr);
+                ui.set_ntc_precompute_bc7_modes(opts.ntc.precompute_bc7_modes);
+                ui.set_ntc_wave_reduced_accum(opts.ntc.stable_training);
 
                 ui.set_rdo_enabled(opts.gacl.rdo_reduction_pct > 0.0);
                 ui.set_rdo_reduction_pct(opts.gacl.rdo_reduction_pct);
@@ -277,10 +294,10 @@ impl GuiController {
                 ui.set_max_tail_res_index(tail_idx);
 
                 let min_tiled_idx = match opts.min_tiled_resolution {
-                    1024 => 1, // Aggressive (1024+)
-                    4096 => 2, // High-Res (4096+)
-                    0 => 3,    // Off / No Threshold (Tile All)
-                    _ => 0,    // Default: Auto (2048+)
+                    1024 => 1,
+                    4096 => 2,
+                    0 => 3,
+                    _ => 0,
                 };
                 ui.set_min_tiled_res_index(min_tiled_idx);
 
@@ -290,7 +307,7 @@ impl GuiController {
                     &ui,
                     &format!(
                         "[Preset] Activated profile: {}",
-                        PackerPreset::ALL_NAMES[idx.clamp(0, 5) as usize]
+                        PackerPreset::ALL_NAMES[idx.clamp(0, 6) as usize]
                     ),
                 );
             }
@@ -451,14 +468,12 @@ impl GuiController {
                     && let Ok(arch) = GameArchive::open(arch_p)
                     && let Ok(mut entries) = get_all_entries_filtered(&arch)
                 {
-                    // Find matching entry sorted by data_offset
                     entries.sort_by_key(|e| e.data_offset);
                     if let Some(entry) = entries.get(idx as usize) {
                         let rel_path = arch
                             .get_path_for_asset(entry)
                             .unwrap_or_else(|| Uuid::from_bytes(entry.asset_id).to_string());
 
-                        // Match index in Explorer table if present
                         if let Some(pos) = s
                             .current_items
                             .iter()
@@ -581,6 +596,37 @@ impl GuiController {
                 let max_tail_idx = ui.get_max_tail_res_index();
                 let key_str = ui.get_encryption_key().to_string();
 
+                // MiniDXNN Options Bridge with exact grid resolution mapping
+                let ntc_enabled = ui.get_ntc_enabled();
+                let ntc_grid_res_idx = ui.get_ntc_grid_res_index();
+                let ntc_bpp = match ntc_grid_res_idx {
+                    0 => 5.0,  // Grid 64x64
+                    1 => 8.0,  // Grid 128x128
+                    2 => 12.0, // Grid 256x256 (High Quality)
+                    3 => 16.0, // Grid 512x512 (Ultra 4K Crisp)
+                    4 => 20.0, // Grid 1024x1024 (Extreme 4K Native)
+                    _ => ui.get_ntc_target_bpp().max(1.5),
+                };
+
+                let ntc_quality_idx = ui.get_ntc_quality_index();
+                let ntc_auto_bundle = ui.get_ntc_auto_bundle();
+                let ntc_precompute_bc7 = ui.get_ntc_precompute_bc7_modes();
+                let ntc_wave_reduced = ui.get_ntc_wave_reduced_accum();
+
+                let sfx_albedo = parse_suffix_list(&ui.get_pbr_suffix_albedo());
+                let sfx_normal = parse_suffix_list(&ui.get_pbr_suffix_normal());
+                let sfx_metallic = parse_suffix_list(&ui.get_pbr_suffix_metal());
+                let sfx_roughness = parse_suffix_list(&ui.get_pbr_suffix_rough());
+                let sfx_ao = parse_suffix_list(&ui.get_pbr_suffix_ao());
+                let sfx_displacement = parse_suffix_list(&ui.get_pbr_suffix_displ());
+
+                let ntc_training_steps = match ntc_quality_idx {
+                    0 => 10,
+                    1 => 30,
+                    2 => 100,
+                    _ => 30,
+                };
+
                 let gacl_enabled = ui.get_gacl_enabled();
                 let gacl_auto_mode = ui.get_gacl_auto_mode();
 
@@ -642,10 +688,10 @@ impl GuiController {
                     };
 
                     let (min_tiled_resolution, min_tiled_tile_count) = match min_tiled_res_idx {
-                        1 => (1024, 4), // Aggressive (1024+) -> 4 tiles minimum
-                        2 => (4096, 8), // High-Res (4096+) -> 8 tiles minimum
-                        3 => (0, 0),    // Off / No Threshold (Tile All) -> No limit
-                        _ => (2048, 8), // Auto (2048+) -> Standard AAA default
+                        1 => (1024, 4),
+                        2 => (4096, 8),
+                        3 => (0, 0),
+                        _ => (2048, 8),
                     };
 
                     let options = PackerOptions {
@@ -682,6 +728,22 @@ impl GuiController {
                             rdo_bc5,
                             rdo_bc6h,
                             rdo_bc7,
+                        },
+                        ntc: NtcPackerOptions {
+                            enabled: ntc_enabled,
+                            target_bpp: ntc_bpp,
+                            training_steps: ntc_training_steps,
+                            auto_bundle_pbr: ntc_auto_bundle,
+                            precompute_bc7_modes: ntc_precompute_bc7,
+                            stable_training: ntc_wave_reduced,
+                            pbr_suffixes: PbrSuffixConfig {
+                                albedo: sfx_albedo,
+                                normal: sfx_normal,
+                                metallic: sfx_metallic,
+                                roughness: sfx_roughness,
+                                ao: sfx_ao,
+                                displacement: sfx_displacement,
+                            },
                         },
                     };
 
@@ -1102,6 +1164,26 @@ pub fn apply_settings_to_ui(ui: &AppWindow, settings: &AppSettings) {
     ui.set_tiled_streaming_enabled(settings.tiled_streaming);
     ui.set_min_tiled_res_index(settings.min_tiled_res_index);
 
+    // MiniDXNN Options Bridge
+    ui.set_ntc_enabled(settings.ntc_enabled);
+    ui.set_ntc_target_bpp(settings.ntc_target_bpp);
+    ui.set_ntc_encoding_index(settings.ntc_encoding_index);
+    ui.set_ntc_grid_res_index(settings.ntc_grid_res_index);
+    ui.set_ntc_optimizer_index(settings.ntc_optimizer_index);
+    ui.set_ntc_quality_index(settings.ntc_quality_index);
+    ui.set_ntc_auto_bundle(settings.ntc_auto_bundle);
+    ui.set_ntc_precompute_bc7_modes(settings.ntc_precompute_bc7_modes);
+    ui.set_ntc_wave_reduced_accum(settings.ntc_wave_reduced_accum);
+    ui.set_ntc_inference_mode_index(settings.ntc_inference_mode_index);
+
+    // Suffix Rules
+    ui.set_pbr_suffix_albedo(SharedString::from(&settings.pbr_suffix_albedo));
+    ui.set_pbr_suffix_normal(SharedString::from(&settings.pbr_suffix_normal));
+    ui.set_pbr_suffix_metal(SharedString::from(&settings.pbr_suffix_metallic));
+    ui.set_pbr_suffix_rough(SharedString::from(&settings.pbr_suffix_roughness));
+    ui.set_pbr_suffix_ao(SharedString::from(&settings.pbr_suffix_ao));
+    ui.set_pbr_suffix_displ(SharedString::from(&settings.pbr_suffix_displacement));
+
     ui.set_gacl_enabled(true);
     ui.set_gacl_auto_mode(settings.gacl_auto_mode);
     ui.set_gacl_bc1_index(settings.gacl_bc1_index);
@@ -1155,6 +1237,24 @@ pub fn save_ui_settings(ui: &AppWindow) {
         tiled_streaming: ui.get_tiled_streaming_enabled(),
         min_tiled_res_index: ui.get_min_tiled_res_index(),
         min_tiled_tile_count: 8,
+
+        ntc_enabled: ui.get_ntc_enabled(),
+        ntc_target_bpp: ui.get_ntc_target_bpp(),
+        ntc_encoding_index: ui.get_ntc_encoding_index(),
+        ntc_grid_res_index: ui.get_ntc_grid_res_index(),
+        ntc_optimizer_index: ui.get_ntc_optimizer_index(),
+        ntc_quality_index: ui.get_ntc_quality_index(),
+        ntc_auto_bundle: ui.get_ntc_auto_bundle(),
+        ntc_precompute_bc7_modes: ui.get_ntc_precompute_bc7_modes(),
+        ntc_wave_reduced_accum: ui.get_ntc_wave_reduced_accum(),
+        ntc_inference_mode_index: ui.get_ntc_inference_mode_index(),
+
+        pbr_suffix_albedo: ui.get_pbr_suffix_albedo().to_string(),
+        pbr_suffix_normal: ui.get_pbr_suffix_normal().to_string(),
+        pbr_suffix_metallic: ui.get_pbr_suffix_metal().to_string(),
+        pbr_suffix_roughness: ui.get_pbr_suffix_rough().to_string(),
+        pbr_suffix_ao: ui.get_pbr_suffix_ao().to_string(),
+        pbr_suffix_displacement: ui.get_pbr_suffix_displ().to_string(),
 
         gacl_auto_mode: ui.get_gacl_auto_mode(),
         gacl_bc1_index: ui.get_gacl_bc1_index(),

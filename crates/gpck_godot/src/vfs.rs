@@ -3,7 +3,7 @@
 //!
 //! Provides runtime archive mounting with priority mod stacks, memory-mapped zero-copy queries,
 //! 64KB sparse tile DirectStorage GPU streaming, Sampler Feedback processing,
-//! and in-engine package compilation with configurable auto-tiling thresholds.
+//! and in-engine package compilation with configurable auto-tiling thresholds and NTC options.
 
 use godot::global::Error;
 use godot::prelude::*;
@@ -15,7 +15,7 @@ use gpck_core::format::archive::TAG_BASE_GAME;
 use gpck_core::gacl::GaclTransform;
 use gpck_core::graphics::dxgi_format::D3D12FormatTable;
 use gpck_core::io::vfs::VirtualFileSystem;
-use gpck_core::packer::{AssetPacker, GaclFormatOverrides, PackerOptions};
+use gpck_core::packer::{AssetPacker, GaclFormatOverrides, NtcPackerOptions, PackerOptions};
 
 #[cfg(windows)]
 use gpck_core::gpu::directstorage::{GpuDirectStorage, QueuePriority};
@@ -583,7 +583,7 @@ impl GpckVfs {
     }
 
     /// Complete Dictionary-driven packaging supporting Brotli-G, 64KB Sparse Tile Packaging,
-    /// and configurable auto-thresholding.
+    /// Neural Texture Compression (NTC), and configurable auto-thresholding.
     #[func]
     pub fn pack_directory_with_options(
         &self,
@@ -657,6 +657,34 @@ impl GpckVfs {
             .and_then(|v| i64::try_from_variant(&v).ok())
             .map(|v| v as usize)
             .unwrap_or(128);
+
+        // NTC Neural Texture Options
+        let ntc_enabled = options_dict
+            .get("ntc_enabled")
+            .and_then(|v| bool::try_from_variant(&v).ok())
+            .unwrap_or(false);
+        let ntc_target_bpp = options_dict
+            .get("ntc_target_bpp")
+            .and_then(|v| f64::try_from_variant(&v).ok())
+            .map(|v| v as f32)
+            .unwrap_or(5.0);
+        let ntc_training_steps = options_dict
+            .get("ntc_training_steps")
+            .and_then(|v| i64::try_from_variant(&v).ok())
+            .map(|v| v as i32)
+            .unwrap_or(10000);
+        let ntc_auto_bundle = options_dict
+            .get("ntc_auto_bundle")
+            .and_then(|v| bool::try_from_variant(&v).ok())
+            .unwrap_or(true);
+        let ntc_precompute_bc7_modes = options_dict
+            .get("ntc_precompute_bc7_modes")
+            .and_then(|v| bool::try_from_variant(&v).ok())
+            .unwrap_or(true);
+        let ntc_stable_training = options_dict
+            .get("ntc_stable_training")
+            .and_then(|v| bool::try_from_variant(&v).ok())
+            .unwrap_or(true);
 
         // GACL Master Switch & Overrides
         let gacl_enabled = options_dict
@@ -765,6 +793,15 @@ impl GpckVfs {
                 rdo_bc5,
                 rdo_bc6h,
                 rdo_bc7,
+            },
+            ntc: NtcPackerOptions {
+                enabled: ntc_enabled,
+                target_bpp: ntc_target_bpp,
+                training_steps: ntc_training_steps,
+                auto_bundle_pbr: ntc_auto_bundle,
+                precompute_bc7_modes: ntc_precompute_bc7_modes,
+                stable_training: ntc_stable_training,
+                ..Default::default()
             },
             atg_profile,
             tiled_streaming,

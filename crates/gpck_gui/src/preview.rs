@@ -1,9 +1,12 @@
 // crates/gpck_gui/src/preview.rs
-//! # Asset Preview Generation, Tonemapping, RGBA Channel Masking & Mipmap Viewer
+//! # Asset Preview Generation, Tonemapping, RGBA Channel Masking & Native Mipmap Viewer
 
 use crate::AppWindow;
 use anyhow::{Result, anyhow, bail};
-use gpck_core::format::archive::{FLAG_BOOT_TAIL, FileEntry, GameArchive, TYPE_TILED_RESOURCE};
+use gpck_core::compression::ntc::{GNTC_MAGIC, GntcHeader, NTEX_MAGIC, NtcContext};
+use gpck_core::format::archive::{
+    FLAG_BOOT_TAIL, FileEntry, GameArchive, TYPE_NEURAL_TEXTURE, TYPE_TILED_RESOURCE,
+};
 use gpck_core::gacl::GaclTransform;
 use gpck_core::graphics::dxgi_format::{D3D12FormatTable, dxgi};
 use gpck_core::graphics::recombine::TextureRecombiner;
@@ -68,6 +71,168 @@ pub fn trigger_async_preview(
             let ext = rel_path.split('.').next_back().unwrap_or("").to_lowercase();
             let is_tail = rel_path.ends_with(".tail") || (flags & FLAG_BOOT_TAIL) != 0;
             let is_highmips = rel_path.ends_with(".highmips");
+            let is_neural_container = ext == "gntc"
+                || ext == "ntex"
+                || (flags & TYPE_NEURAL_TEXTURE) != 0
+                || (data.len() >= 4
+                    && (u32::from_le_bytes(data[0..4].try_into().unwrap_or_default())
+                        == GNTC_MAGIC
+                        || u32::from_le_bytes(data[0..4].try_into().unwrap_or_default())
+                            == NTEX_MAGIC));
+
+            // ================================================================
+            // 1. Dedicated Neural PBR Material Preview (.gntc / .ntex) - Native 1:1 Resolution
+            // ================================================================
+            if is_neural_container {
+                let header_size = std::mem::size_of::<GntcHeader>();
+                let (native_w, native_h) = if data.len() >= header_size {
+                    let header: &GntcHeader = bytemuck::from_bytes(&data[..header_size]);
+                    (header.width.max(64), header.height.max(64))
+                } else {
+                    (width.max(512) as u32, height.max(512) as u32)
+                };
+
+                if let Ok(pbr) = NtcContext::decode_gntc_preview(&data, native_w) {
+                    let mip_options = vec![
+                        format!("Quad-View (2x2 Matrix {}x{})", native_w * 2, native_h * 2),
+                        format!("Albedo (Base Color {}x{})", native_w, native_h),
+                        format!("Normal Map (Tangent {}x{})", native_w, native_h),
+                        format!("ORM Map (Damage/Rough/Metal {}x{})", native_w, native_h),
+                        format!("Roughness Channel ({}x{})", native_w, native_h),
+                    ];
+
+                    let pixel_buf = match target_mip {
+                        // View 1: Standalone Albedo (Native W x H)
+                        1 => {
+                            let mut buf =
+                                SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+                            dst.copy_from_slice(&pbr.albedo);
+                            apply_tonemap_to_rgba8(dst, tonemap_operator);
+                            apply_channel_mask(
+                                dst,
+                                channel_mask[0],
+                                channel_mask[1],
+                                channel_mask[2],
+                                channel_mask[3],
+                            );
+                            buf
+                        }
+                        // View 2: Standalone Normal Map (Native W x H)
+                        2 => {
+                            let mut buf =
+                                SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+                            dst.copy_from_slice(&pbr.normal);
+                            apply_channel_mask(
+                                dst,
+                                channel_mask[0],
+                                channel_mask[1],
+                                channel_mask[2],
+                                channel_mask[3],
+                            );
+                            buf
+                        }
+                        // View 3: Standalone ORM Map (Native W x H)
+                        3 => {
+                            let mut buf =
+                                SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+                            dst.copy_from_slice(&pbr.orm);
+                            apply_channel_mask(
+                                dst,
+                                channel_mask[0],
+                                channel_mask[1],
+                                channel_mask[2],
+                                channel_mask[3],
+                            );
+                            buf
+                        }
+                        // View 4: Standalone Roughness Channel (Native W x H Grayscale)
+                        4 => {
+                            let mut buf =
+                                SharedPixelBuffer::<slint::Rgba8Pixel>::new(pbr.width, pbr.height);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+                            for (src_px, dst_px) in
+                                pbr.orm.chunks_exact(4).zip(dst.chunks_exact_mut(4))
+                            {
+                                let r_val = src_px[1]; // Roughness
+                                dst_px[0] = r_val;
+                                dst_px[1] = r_val;
+                                dst_px[2] = r_val;
+                                dst_px[3] = 255;
+                            }
+                            buf
+                        }
+                        // View 0 (Default): Quad-View 2x2 Matrix (2*W x 2*H)
+                        _ => {
+                            let qw = native_w * 2;
+                            let qh = native_h * 2;
+                            let mut buf = SharedPixelBuffer::<slint::Rgba8Pixel>::new(qw, qh);
+                            let dst: &mut [u8] = bytemuck::cast_slice_mut(buf.make_mut_slice());
+
+                            let nw = native_w as usize;
+                            let nh = native_h as usize;
+                            let q_stride = qw as usize;
+
+                            for y in 0..nh {
+                                for x in 0..nw {
+                                    let src_idx = (y * nw + x) * 4;
+
+                                    // Top-Left: Albedo (0..nw, 0..nh)
+                                    let tl_idx = (y * q_stride + x) * 4;
+                                    dst[tl_idx..tl_idx + 4]
+                                        .copy_from_slice(&pbr.albedo[src_idx..src_idx + 4]);
+
+                                    // Top-Right: Normal (nw..2nw, 0..nh)
+                                    let tr_idx = (y * q_stride + (x + nw)) * 4;
+                                    dst[tr_idx..tr_idx + 4]
+                                        .copy_from_slice(&pbr.normal[src_idx..src_idx + 4]);
+
+                                    // Bottom-Left: ORM (0..nw, nh..2nh)
+                                    let bl_idx = ((y + nh) * q_stride + x) * 4;
+                                    dst[bl_idx..bl_idx + 4]
+                                        .copy_from_slice(&pbr.orm[src_idx..src_idx + 4]);
+
+                                    // Bottom-Right: Roughness (nw..2nw, nh..2nh)
+                                    let br_idx = ((y + nh) * q_stride + (x + nw)) * 4;
+                                    let r_val = pbr.orm[src_idx + 1];
+                                    dst[br_idx..br_idx + 4]
+                                        .copy_from_slice(&[r_val, r_val, r_val, 255]);
+                                }
+                            }
+
+                            // Dynamic Cyan Grid Dividers
+                            for y in 0..qh as usize {
+                                let idx = (y * q_stride + (nw - 1)) * 4;
+                                dst[idx..idx + 4].copy_from_slice(&[56, 189, 248, 255]);
+                                let idx2 = (y * q_stride + nw) * 4;
+                                dst[idx2..idx2 + 4].copy_from_slice(&[56, 189, 248, 255]);
+                            }
+                            for x in 0..qw as usize {
+                                let idx = ((nh - 1) * q_stride + x) * 4;
+                                dst[idx..idx + 4].copy_from_slice(&[56, 189, 248, 255]);
+                                let idx2 = (nh * q_stride + x) * 4;
+                                dst[idx2..idx2 + 4].copy_from_slice(&[56, 189, 248, 255]);
+                            }
+
+                            apply_channel_mask(
+                                dst,
+                                channel_mask[0],
+                                channel_mask[1],
+                                channel_mask[2],
+                                channel_mask[3],
+                            );
+                            buf
+                        }
+                    };
+
+                    return Ok(PreviewResult::PixelBuffer {
+                        buffer: pixel_buf,
+                        mips: mip_options,
+                    });
+                }
+            }
 
             let dummy_entry = FileEntry {
                 asset_id: [0; 16],
@@ -228,7 +393,6 @@ pub fn trigger_async_preview(
 pub fn apply_channel_mask(pixels: &mut [u8], r: bool, g: bool, b: bool, a: bool) {
     let active_color_count = (r as u8) + (g as u8) + (b as u8);
 
-    // Single-channel isolation mode: replicate to grayscale
     if active_color_count == 1 && !a {
         for px in pixels.chunks_exact_mut(4) {
             let val = if r {
@@ -236,7 +400,7 @@ pub fn apply_channel_mask(pixels: &mut [u8], r: bool, g: bool, b: bool, a: bool)
             } else if g {
                 px[1]
             } else {
-                px[2] // Extracts 0 (Black) when Blue channel is absent
+                px[2]
             };
             px[0] = val;
             px[1] = val;
@@ -331,7 +495,7 @@ pub fn load_texture_to_buffer(
         }
     }
 
-    // Fast Path: Direct Uncompressed RGB / RGBA / BGRA Decoder
+    // Direct Uncompressed RGB / RGBA / BGRA Decoder
     if data.len() >= 128 && data.starts_with(b"DDS ") && width > 0 && height > 0 {
         let total_pixels = (width as usize) * (height as usize);
 
@@ -414,9 +578,7 @@ pub fn load_texture_to_buffer(
     let is_tail = rel_path.ends_with(".tail") || (entry.flags & FLAG_BOOT_TAIL) != 0;
     let is_tiled = (entry.flags & TYPE_TILED_RESOURCE) != 0;
 
-    // Block-Compressed & Tiled Decoding Path
     let processed_dds_bytes = if is_tail && width > 0 && height > 0 {
-        // Packed Boot-Tail Decoder: Extract individual requested mip level from 64KB tail block
         let (tail_mip_bytes, tw, th) = extract_tail_mip(
             data,
             width,
@@ -428,7 +590,6 @@ pub fn load_texture_to_buffer(
         )?;
         TextureRecombiner::wrap_in_dds_header(tw, th, dxgi_fmt, &tail_mip_bytes)
     } else if is_tiled && width > 0 && height > 0 {
-        // Standard Virtual Tiled Resource Decoder
         let (linear_bytes, mw, mh) = detile_specific_mip(
             data,
             width,
@@ -496,9 +657,6 @@ pub fn load_texture_to_buffer(
     let raw_bytes: &mut [u8] = bytemuck::cast_slice_mut(pixel_buffer.make_mut_slice());
     raw_bytes.copy_from_slice(rgba_img.as_raw());
 
-    // Strict Ground-Truth Channel Mapping:
-    // For 2-channel formats (BC5 / RGTC / R8G8), ensure absent Blue channel is strictly 0 (Black).
-    // This accurately mirrors Photoshop, RenderDoc, and hardware GPU sampling without misleading the user.
     let is_two_channel = dxgi_fmt == dxgi::BC5_UNORM
         || dxgi_fmt == dxgi::BC5_SNORM
         || dxgi_fmt == dxgi::R8G8_UNORM
@@ -512,7 +670,7 @@ pub fn load_texture_to_buffer(
                 let nz = (1.0f32 - nx * nx - ny * ny).max(0.0).sqrt();
                 px[2] = (nz * 255.0).clamp(0.0, 255.0) as u8;
             } else {
-                px[2] = 0; // Raw 2-channel mode (Blue = 0)
+                px[2] = 0;
             }
             px[3] = 255;
         }
@@ -555,7 +713,6 @@ pub fn load_texture_to_buffer(
     Some(pixel_buffer)
 }
 
-/// Decodes an exact individual mipmap from a packed 64KB boot-tail block (`.tail`).
 fn extract_tail_mip(
     tail_data: &[u8],
     tail_base_width: u32,
@@ -655,7 +812,6 @@ fn detile_specific_mip(
     let mip_hb = (mip_h as usize).div_ceil(4);
     let target_mip_bytes = mip_wb * mip_hb * element_size;
 
-    // Standard 64KB Tiles
     if target_mip < num_standard_mips {
         let tiling = tilings.get(target_mip as usize)?;
         let mut current_tile_idx = tiling.start_tile_index_in_overall_resource as usize;
@@ -714,7 +870,6 @@ fn detile_specific_mip(
         return Some((linear_buffer, mip_w, mip_h));
     }
 
-    // Monolithic Packed Mip Tail
     let tail_start_tile = packed_info.start_tile_index_in_overall_resource as usize;
     let tail_byte_offset_in_archive = tail_start_tile * tile_size;
 

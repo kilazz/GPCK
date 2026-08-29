@@ -1,12 +1,12 @@
 // crates/gpck_core/src/packer/texture.rs
-//! # Pipeline Stage 2: Texture Conditioning, Mip-Splitting & 64KB Tile Alignment
+//! # Pipeline Stage 2: Texture Conditioning, Mip-Splitting, NTC & 64KB Tile Alignment
 
 use crate::compression::codecs::CompressionMethod;
 use crate::core::asset_id::AssetIdGenerator;
 use crate::core::error::GpckResult;
 use crate::format::archive::{
     FLAG_BOOT_TAIL, FLAG_ENCRYPTED_META, FLAG_IS_COMPRESSED, FLAG_STREAMING, SHIFT_ALIGNMENT,
-    SHIFT_GACL_TRANSFORM, TYPE_TEXTURE, TYPE_TILED_RESOURCE,
+    SHIFT_GACL_TRANSFORM, TYPE_NEURAL_TEXTURE, TYPE_TEXTURE, TYPE_TILED_RESOURCE,
 };
 use crate::format::dds::{DdsBasicInfo, DdsUtils};
 use crate::format::ktx2::Ktx2Utils;
@@ -45,11 +45,20 @@ pub fn process_file(
     let lower_path = rel_path.to_lowercase();
     let method = resolve_packer_method(options.method, &lower_path);
 
+    // Direct Neural Texture Container (.gntc / .ntex)
+    if lower_path.ends_with(".gntc") || lower_path.ends_with(".ntex") {
+        return process_neural_texture_container(&raw_data, rel_path, options, method);
+    }
+
+    // DDS Textures
     if lower_path.ends_with(".dds")
         && let Some(processed) = process_dds_texture(&raw_data, rel_path, options, method)?
     {
         return Ok(processed);
-    } else if lower_path.ends_with(".ktx2")
+    }
+
+    // KTX2 Textures
+    if lower_path.ends_with(".ktx2")
         && let Some(processed) = process_ktx2_texture(&raw_data, rel_path, options, method)?
     {
         return Ok(processed);
@@ -58,9 +67,39 @@ pub fn process_file(
     process_generic_binary(&raw_data, rel_path, options, method)
 }
 
-// ============================================================================
-// Format Handlers
-// ============================================================================
+fn process_neural_texture_container(
+    raw_data: &[u8],
+    rel_path: &str,
+    options: &PackerOptions,
+    method: CompressionMethod,
+) -> GpckResult<Vec<ProcessedFile>> {
+    let chunks = chunker::compress_to_chunks(
+        raw_data,
+        options.chunk_size,
+        options.level,
+        method,
+        options.validate_chunks,
+        options.atg_profile,
+    )?;
+
+    let flags = FLAG_STREAMING | TYPE_NEURAL_TEXTURE | TYPE_TILED_RESOURCE;
+
+    let mut processed = build_processed_file(ProcessedFileParams {
+        rel_path: rel_path.to_string(),
+        original_size: raw_data.len() as u32,
+        chunks,
+        flags,
+        tags: options.tags,
+        method,
+        alignment: TILE_HARDWARE_ALIGNMENT,
+        key: options.key.as_ref(),
+    });
+
+    processed.meta1 = (2048 << 16) | 2048; // Default metadata dimensions
+    processed.meta2 = (1u32 << 24) | (processed.chunks.len() as u32 & 0xFFFF);
+
+    Ok(vec![processed])
+}
 
 fn process_dds_texture(
     raw_data: &[u8],
