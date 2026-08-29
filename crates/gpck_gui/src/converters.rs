@@ -86,7 +86,6 @@ pub fn generate_ui_elements_from_archive(
             Color::from_rgb_u8(255, 87, 34),
         ];
 
-        // Generate standard file table rows
         for e in &entries {
             let name = arch
                 .get_path_for_asset(e)
@@ -199,8 +198,6 @@ pub fn generate_ui_elements_from_archive(
         // ====================================================================
         // Physical Disk Layout Sorting for VFS Block Visualizer
         // ====================================================================
-        // Sorts strictly by physical `data_offset` on NVMe storage.
-        // Guarantees Block 0..K represents Partition 0 Boot-Tails at the start of .gdat.
         let mut physical_entries = entries.clone();
         physical_entries.sort_by_key(|e| e.data_offset);
 
@@ -225,7 +222,13 @@ pub fn generate_ui_elements_from_archive(
                 _ => Color::from_rgb_u8(207, 216, 220),
             };
 
-            let color_part = part_colors[(e.partition_id as usize) % part_colors.len()];
+            // Calculate true physical partition from LBA offset for pure monolithic bands
+            let physical_partition_id = if is_boot_tail {
+                0
+            } else {
+                (e.data_offset as usize) / (64 * 1024 * 1024)
+            };
+            let color_part = part_colors[physical_partition_id % part_colors.len()];
 
             blocks.push(BlockItemUI {
                 width: block_width,
@@ -240,7 +243,7 @@ pub fn generate_ui_elements_from_archive(
                 offset_str: SharedString::from(offset_hex),
                 size_str: SharedString::from(format_size(e.original_size as u64)),
                 comp_size_str: SharedString::from(format_size(e.compressed_size as u64)),
-                partition_str: SharedString::from(format!("Partition {}", e.partition_id)),
+                partition_str: SharedString::from(format!("Partition {}", physical_partition_id)),
                 codec_str: SharedString::from(format!("{:?}", method)),
                 is_boot_tail,
             });

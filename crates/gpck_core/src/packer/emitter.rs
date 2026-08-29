@@ -1,10 +1,15 @@
 // crates/gpck_core/src/packer/emitter.rs
-//! # Pipeline Stage 5: GDAT Sequential Emission & CHD Minimal Perfect Hashing
+//! # Pipeline Stage 5: Two-Pass GDAT Emission & CHD Minimal Perfect Hashing
+//!
+//! Features:
+//! - Pass 1: Global frequency and reference counting for deduplicated chunks.
+//! - Pass 2: Partition 0 Global Shared Pool isolation (shared tiles & boot tails).
+//! - Clean, sequential sector partitions (P1..N) with 100% contiguous LBA stream layout.
 
 use crate::core::error::{GpckError, GpckResult};
 use crate::format::archive::{
-    ArchiveHeader, BundleEntry, ChunkInfo, FileEntry, MAGIC_INT, calculate_primary_hash_with_seed,
-    hash_asset_id_with_seed,
+    ArchiveHeader, BundleEntry, ChunkInfo, FLAG_BOOT_TAIL, FileEntry, MAGIC_INT,
+    calculate_primary_hash_with_seed, hash_asset_id_with_seed,
 };
 use crate::packer::ProcessedFile;
 use bytemuck::Zeroable;
@@ -31,28 +36,79 @@ pub fn spawn_gdat_writer(
         let mut current_partition_bytes = 0usize;
         let mut current_partition_id = 0u32;
         let mut chunk_offset_map: HashMap<u64, i64> = HashMap::new();
-        let mut written_files = Vec::new();
 
-        while let Ok(mut file) = rx.recv() {
-            file.partition_id = current_partition_id;
+        // Pass 1: Collect incoming files and analyze chunk reference frequencies
+        let mut incoming_files = Vec::new();
+        let mut hash_frequency: HashMap<u64, usize> = HashMap::new();
 
-            let file_aligned = (current_data_ptr + file.alignment - 1) & !(file.alignment - 1);
-            let file_padding = (file_aligned - current_data_ptr) as usize;
-            if file_padding > 0 {
-                gdat_file
-                    .write_all(&vec![0u8; file_padding])
-                    .map_err(GpckError::Io)?;
-                current_data_ptr = file_aligned;
-                current_partition_bytes += file_padding;
+        while let Ok(file) = rx.recv() {
+            if enable_dedup {
+                for chunk in &file.chunks {
+                    *hash_frequency.entry(chunk.hash).or_insert(0) += 1;
+                }
             }
+            incoming_files.push(file);
+        }
+
+        // Pass 2 - Phase A: Emit Partition 0 (Global Shared Pool + Boot Tier)
+        // All chunks referenced by >= 2 files or flagged as BOOT_TAIL are written first into P0.
+        if enable_dedup {
+            for file in &mut incoming_files {
+                let is_boot_tier =
+                    (file.flags & FLAG_BOOT_TAIL) != 0 || file.original_path.ends_with(".tail");
+
+                for chunk in &mut file.chunks {
+                    let is_shared = hash_frequency.get(&chunk.hash).copied().unwrap_or(0) > 1;
+
+                    if (is_shared || is_boot_tier)
+                        && !chunk_offset_map.contains_key(&chunk.hash)
+                        && !chunk.data.is_empty()
+                    {
+                        let chunk_aligned = (current_data_ptr + 3) & !3;
+                        let chunk_padding = (chunk_aligned - current_data_ptr) as usize;
+                        if chunk_padding > 0 {
+                            gdat_file
+                                .write_all(&vec![0u8; chunk_padding])
+                                .map_err(GpckError::Io)?;
+                        }
+
+                        gdat_file.write_all(&chunk.data).map_err(GpckError::Io)?;
+                        chunk_offset_map.insert(chunk.hash, chunk_aligned);
+                        current_data_ptr = chunk_aligned + chunk.data.len() as i64;
+                        current_partition_bytes += chunk_padding + chunk.data.len();
+                    }
+                }
+            }
+        }
+
+        // Advance to Partition 1 for sector-specific streaming assets
+        if current_partition_bytes > 0 {
+            current_partition_id = 1;
+            current_partition_bytes = 0;
+        }
+
+        // Pass 2 - Phase B: Emit Sector Partitions (Partitions 1..N)
+        // Unique sector chunks are written strictly sequential.
+        let mut written_files = Vec::with_capacity(incoming_files.len());
+
+        for mut file in incoming_files {
+            let is_pure_boot_file =
+                (file.flags & FLAG_BOOT_TAIL) != 0 || file.original_path.ends_with(".tail");
+            file.partition_id = if is_pure_boot_file {
+                0
+            } else {
+                current_partition_id
+            };
 
             for chunk in &mut file.chunks {
-                if enable_dedup && let Some(&existing_offset) = chunk_offset_map.get(&chunk.hash) {
+                // If chunk is in Partition 0 (Shared Pool) or already written
+                if let Some(&existing_offset) = chunk_offset_map.get(&chunk.hash) {
                     chunk.offset = existing_offset;
                     chunk.data.clear();
                     continue;
                 }
 
+                // Partition boundary check
                 if current_partition_bytes > 0
                     && current_partition_bytes + chunk.data.len() > max_partition_size
                 {
@@ -74,14 +130,13 @@ pub fn spawn_gdat_writer(
                 current_data_ptr = chunk_aligned + chunk.data.len() as i64;
                 current_partition_bytes += chunk_padding + chunk.data.len();
 
-                if enable_dedup {
-                    chunk_offset_map.insert(chunk.hash, chunk_aligned);
-                }
-
+                chunk_offset_map.insert(chunk.hash, chunk_aligned);
                 chunk.data.clear();
             }
+
             written_files.push(file);
         }
+
         Ok(written_files)
     })
 }

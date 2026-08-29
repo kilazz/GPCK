@@ -4,6 +4,7 @@
 use super::chunker;
 use super::emitter;
 use super::ntc_packer::NtcBundlePacker;
+use super::sorter;
 use super::texture;
 use super::types::{
     DEFAULT_MAX_PARTITION_SIZE, GaclFormatOverrides, NtcPackerOptions, PackerOptions, PipGap,
@@ -12,7 +13,7 @@ use super::types::{
 use crate::compression::codecs::CompressionMethod;
 use crate::compression::ntc::NtcPbrMaterialBundle;
 use crate::core::error::{GpckError, GpckResult};
-use crate::format::archive::{FLAG_BOOT_TAIL, TAG_BASE_GAME};
+use crate::format::archive::TAG_BASE_GAME;
 use crate::format::dds::DdsUtils;
 use crossbeam_channel::bounded;
 use rayon::prelude::*;
@@ -48,11 +49,7 @@ impl PackingPipeline {
         let gtoc_path = output_ref.with_extension("gtoc");
         let gdat_path = output_ref.with_extension("gdat");
 
-        let mut pending_files: Vec<(PathBuf, String)> = file_map
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-
+        let mut pending_files = sorter::sort_for_streaming(file_map);
         let mut all_processed_files: Vec<ProcessedFile> = Vec::new();
 
         // ====================================================================
@@ -118,30 +115,11 @@ impl PackingPipeline {
         }
 
         // ====================================================================
-        // Strict 3-Tier NVMe Streaming Layout Sorting
+        // Spatial Locality & 3-Tier Sector Sorting
         // ====================================================================
-        all_processed_files.sort_by(|a, b| {
-            let is_tail_a = (a.flags & FLAG_BOOT_TAIL) != 0 || a.original_path.ends_with(".tail");
-            let is_tail_b = (b.flags & FLAG_BOOT_TAIL) != 0 || b.original_path.ends_with(".tail");
+        sorter::sort_processed_files_for_streaming(&mut all_processed_files);
 
-            // Tier 1: Boot Tails MUST be placed first (Partition 0)
-            if is_tail_a != is_tail_b {
-                return is_tail_b.cmp(&is_tail_a);
-            }
-
-            let is_highmips_a = a.original_path.ends_with(".highmips");
-            let is_highmips_b = b.original_path.ends_with(".highmips");
-
-            // Tier 3: Highmips placed last (Soft streaming queue)
-            if is_highmips_a != is_highmips_b {
-                return is_highmips_a.cmp(&is_highmips_b);
-            }
-
-            // Tier 2: Deterministic alphanumeric path ordering
-            a.original_path.cmp(&b.original_path)
-        });
-
-        // Stream Sorted Layout into GDAT Writer
+        // Stream Sorted Layout into Two-Pass GDAT Writer
         let (tx, rx) = bounded::<ProcessedFile>(128);
         let writer_handle = emitter::spawn_gdat_writer(
             gdat_path,
@@ -196,7 +174,6 @@ impl PackingPipeline {
             rule_list.push((s.as_str(), 5));
         }
 
-        // Sort suffix rules by length descending so longer matching suffixes take priority
         rule_list.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
 
         for (idx, (abs_path, rel_path)) in files.iter().enumerate() {
@@ -304,7 +281,6 @@ impl PackingPipeline {
 
         let ao = slot.ao_path.as_ref().and_then(|p| std::fs::read(p).ok());
 
-        // Dynamically extract real texture dimensions from available source DDS headers
         let mut width = 2048u32;
         let mut height = 2048u32;
 
