@@ -139,7 +139,6 @@ fn process_tiled_dds_from_result(
 ) -> GpckResult<Vec<ProcessedFile>> {
     let mut out_files = Vec::new();
 
-    // Calculate dimensions of the starting level for the packed tail sequence
     let tail_w = (meta.width >> tile_res.num_standard_mips).max(1);
     let tail_h = (meta.height >> tile_res.num_standard_mips).max(1);
     let tail_meta1 = (tail_w << 16) | (tail_h & 0xFFFF);
@@ -147,7 +146,31 @@ fn process_tiled_dds_from_result(
         | ((meta.dxgi_format & 0xFF) << 16)
         | (tile_res.tail_chunks.len() as u32 & 0xFFFF);
 
-    // 1. Companion Boot-Tail File (Partition 0 Placement for Sub-100ms Startup Rendering)
+    // CASE 1: Texture has ONLY Tail tiles (num_standard_mips == 0, e.g. 512x128, 128x512, 256x256)
+    // Emit directly under real name into Partition 0 without creating 0-byte ghost files!
+    if tile_res.standard_chunks.is_empty() {
+        if !tile_res.tail_chunks.is_empty() {
+            let tail_file = ProcessedFileBuilder::new(
+                rel_path,
+                (tile_res.tail_chunks.len() * 65536) as u32,
+                method,
+            )
+            .chunks(tile_res.tail_chunks)
+            .flags(TYPE_TEXTURE | TYPE_TILED_RESOURCE | FLAG_BOOT_TAIL)
+            .gacl_transform(get_linear_transform(tile_res.gacl_transform))
+            .metadata(meta.meta1(), tail_meta2)
+            .partition_id(0)
+            .tags(options.tags)
+            .alignment(TILE_HARDWARE_ALIGNMENT)
+            .encryption_key(options.key.as_ref())
+            .build();
+
+            out_files.push(tail_file);
+        }
+        return Ok(out_files);
+    }
+
+    // CASE 2: Texture has BOTH Standard tiles and Tail tiles
     if !tile_res.tail_chunks.is_empty() {
         let tail_file = ProcessedFileBuilder::new(
             format!("{}.tail", rel_path),
@@ -158,7 +181,7 @@ fn process_tiled_dds_from_result(
         .flags(TYPE_TEXTURE | TYPE_TILED_RESOURCE | FLAG_BOOT_TAIL)
         .gacl_transform(get_linear_transform(tile_res.gacl_transform))
         .metadata(tail_meta1, tail_meta2)
-        .partition_id(0) // Strictly placed in Partition 0 (Boot Partition)
+        .partition_id(0)
         .tags(options.tags)
         .alignment(TILE_HARDWARE_ALIGNMENT)
         .encryption_key(options.key.as_ref())
@@ -167,7 +190,6 @@ fn process_tiled_dds_from_result(
         out_files.push(tail_file);
     }
 
-    // 2. Primary Tiled Resource (Standard Mip Tiles streamed dynamically on demand)
     let standard_meta1 = meta.meta1();
     let standard_meta2 = ((tile_res.num_standard_mips & 0xFF) << 24)
         | ((meta.dxgi_format & 0xFF) << 16)
