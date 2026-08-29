@@ -1,0 +1,76 @@
+// crates/gpck_gui/ui/components/statusbar.slint
+import { Theme } from "../theme.slint";
+import { ModernProgressBar } from "widgets.slint";
+
+export component BottomStatusBar inherits Rectangle {
+    in property <bool> is-processing: false;
+    in property <float> progress-value: 0.0;
+    in property <string> status-text: "";
+    in property <string> total-vram-footprint: "0 B";
+    in property <string> total-disk-footprint: "0 B";
+    in property <int> file-count: 0;
+
+    background: #111113;
+    height: 28px;
+
+    Rectangle {
+        y: 0px;
+        height: 1px;
+        background: #222228;
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: 10px;
+
+            if root.is-processing: HorizontalLayout {
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    ModernProgressBar {
+                        progress: root.progress-value;
+                    }
+                }
+
+                Text {
+                    text: "\{round(root.progress-value * 100)}%";
+                    color: Theme.accent-cyan;
+                    font-size: 10px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    width: 28px;
+                }
+            }
+
+            Text {
+                text: root.status-text;
+                color: Theme.accent-cyan;
+                font-size: 11px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 16px;
+            Text {
+                text: "VRAM: \{root.total-vram-footprint} | Disk: \{root.total-disk-footprint}";
+                color: Theme.text-muted;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "Total Items: \{root.file-count}";
+                color: Theme.text-muted;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

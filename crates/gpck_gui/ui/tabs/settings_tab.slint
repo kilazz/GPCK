@@ -1,0 +1,909 @@
+// crates/gpck_gui/ui/tabs/settings_tab.slint
+import {
+    Button,
+    CheckBox,
+    ComboBox,
+    LineEdit,
+    Slider,
+    ScrollView,
+} from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { Card } from "../components/widgets.slint";
+
+export component SettingsTab inherits ScrollView {
+    in-out property <int> preset-index: 0;
+    in-out property <int> method-index: 0;
+    in-out property <int> compression-level: 9;
+    in-out property <int> partition-size-index: 1;
+    in-out property <bool> enable-deduplication: true;
+    in-out property <bool> validate-chunks: true;
+    in-out property <bool> atg-profile: true;
+    in-out property <bool> tiled-streaming-enabled: true;
+    in-out property <int> min-tiled-res-index: 0;
+
+    // MiniDXNN Native Neural Textures
+    in-out property <bool> ntc-enabled: false;
+    in-out property <float> ntc-target-bpp: 5.0;
+    in-out property <int> ntc-encoding-index: 0;
+    in-out property <int> ntc-grid-res-index: 1;
+    in-out property <int> ntc-optimizer-index: 0;
+    in-out property <int> ntc-quality-index: 1;
+    in-out property <bool> ntc-auto-bundle: true;
+    in-out property <bool> ntc-precompute-bc7-modes: true;
+    in-out property <bool> ntc-wave-reduced-accum: true;
+    in-out property <int> ntc-inference-mode-index: 0;
+
+    // PBR Suffix Rules
+    in-out property <string> pbr-suffix-albedo: "_diff, _albedo, _basecolor, _color, _col, _d";
+    in-out property <string> pbr-suffix-normal: "_ddn, _ddna, _normal, _norm, _nrm, _n";
+    in-out property <string> pbr-suffix-metal: "_spec, _specular, _metal, _metallic, _m";
+    in-out property <string> pbr-suffix-rough: "_gloss, _rough, _roughness, _r";
+    in-out property <string> pbr-suffix-ao: "_ao, _ambient, _occlusion";
+    in-out property <string> pbr-suffix-displ: "_displ, _disp, _height, _h";
+
+    // GACL & RDO
+    in-out property <bool> gacl-enabled: true;
+    in-out property <bool> gacl-auto-mode: true;
+    in-out property <int> gacl-bc1-index: 0;
+    in-out property <int> gacl-bc2-index: 0;
+    in-out property <int> gacl-bc3-index: 0;
+    in-out property <int> gacl-bc4-index: 0;
+    in-out property <int> gacl-bc5-index: 0;
+    in-out property <int> gacl-bc6h-index: 0;
+    in-out property <int> gacl-bc7-index: 0;
+
+    in-out property <bool> rdo-enabled: false;
+    in-out property <float> rdo-reduction-pct: 5.0;
+    in-out property <bool> rdo-use-ycocg: true;
+    in-out property <bool> rdo-bc1: true;
+    in-out property <bool> rdo-bc2: true;
+    in-out property <bool> rdo-bc3: true;
+    in-out property <bool> rdo-bc4: false;
+    in-out property <bool> rdo-bc5: false;
+    in-out property <bool> rdo-bc6h: false;
+    in-out property <bool> rdo-bc7: true;
+
+    // Streaming
+    in-out property <bool> mip-split-enabled: true;
+    in-out property <int> max-tail-res-index: 1;
+
+    // GPU & Security
+    in-out property <bool> prefer-gpu-decompression: true;
+    in-out property <int> staging-buffer-size-index: 2;
+    in-out property <int> default-queue-priority-index: 0;
+    in-out property <string> encryption-key: "";
+
+    callback preset-selected(int);
+    callback run-bench-clicked();
+    callback run-custom-bench-clicked();
+
+    property <int> max-compression-level: root.method-index == 1 ? 22 : (root.method-index == 4 ? 11 : (root.method-index == 0 || root.method-index == 2 ? 9 : 1));
+    property <bool> is-level-enabled: root.method-index != 5 && root.method-index != 3;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+        alignment: start;
+
+        // Preset Selector Bar
+        Rectangle {
+            background: Theme.surface-card;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.border-focus;
+            height: 44px;
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                alignment: space-between;
+
+                Text {
+                    text: "Packaging Preset / Quality Profile:";
+                    vertical-alignment: center;
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: Theme.accent-blue;
+                }
+
+                ComboBox {
+                    width: 440px;
+                    model: [
+                        "GPU Streaming (PC / DirectStorage)",
+                        "Next-Gen Neural PBR (MiniDXNN / DP4a / 5 bpp)",
+                        "Mobile / Android (ASTC / ETC2 + LZ4)",
+                        "Maximum Compression (Distribution)",
+                        "Fast Dev Build (Iteration)",
+                        "Secure Delivery (Encrypted)",
+                        "Custom (User Defined)"
+                    ];
+                    current-index <=> root.preset-index;
+                    selected(val) => {
+                        root.preset-selected(root.preset-index);
+                    }
+                }
+            }
+        }
+
+        GridLayout {
+            spacing: 12px;
+
+            Row {
+                Card {
+                    title: "[COMPRESSION] Archiving & Compression Engine";
+                    header-color: Theme.accent-blue;
+
+                    GridLayout {
+                        spacing: 8px;
+                        Row {
+                            Text {
+                                text: "Algorithm:";
+                                color: #D1D5DB;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                width: 130px;
+                            }
+
+                            ComboBox {
+                                model: ["GDeflate", "Zstd", "LZ4", "rANS", "Brotli-G", "Store"];
+                                current-index <=> root.method-index;
+                                selected(val) => {
+                                    if (root.method-index == 0 && root.compression-level > 9) { root.compression-level = 9; }
+                                    if (root.method-index == 2 && root.compression-level > 9) { root.compression-level = 9; }
+                                    if (root.method-index == 3) { root.compression-level = 1; }
+                                    if (root.method-index == 4 && root.compression-level > 11) { root.compression-level = 11; }
+                                    if (root.method-index == 5) { root.compression-level = 0; }
+                                }
+                            }
+                        }
+
+                        Row {
+                            Text {
+                                text: "Compression Level:";
+                                color: #D1D5DB;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                width: 130px;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Slider {
+                                    minimum: root.method-index == 5 ? 0 : 1;
+                                    maximum: root.max-compression-level;
+                                    value: root.compression-level;
+                                    enabled: root.is-level-enabled;
+                                    changed(val) => {
+                                        root.compression-level = round(val);
+                                    }
+                                }
+
+                                Text {
+                                    text: root.method-index == 5 ? "Off" : "\{root.compression-level}";
+                                    color: root.is-level-enabled ? Theme.text-bright : Theme.text-dim;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 24px;
+                                }
+                            }
+                        }
+
+                        Row {
+                            Text {
+                                text: "Partition Size (NVMe):";
+                                color: #D1D5DB;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                width: 130px;
+                            }
+
+                            ComboBox {
+                                model: ["32 MB", "64 MB", "128 MB", "256 MB", "512 MB"];
+                                current-index <=> root.partition-size-index;
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        CheckBox {
+                            text: "Content-Defined Deduplication (XxHash64)";
+                            checked <=> root.enable-deduplication;
+                        }
+
+                        CheckBox {
+                            text: "Validate Chunk Decompression on Pack";
+                            checked <=> root.validate-chunks;
+                        }
+
+                        CheckBox {
+                            text: "Enforce ATG DirectStorage L2/L3 Cache Bounds (256 KB) [Zstd only]";
+                            checked <=> root.atg-profile;
+                            enabled: root.method-index == 1;
+                        }
+                    }
+                }
+
+                Card {
+                    title: "[NEURAL] Hardware GPU Neural Material Engine (MiniDXNN / DP4a)";
+                    header-color: Theme.accent-emerald;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            CheckBox {
+                                text: "Enable Neural Textures (MiniDXNN)";
+                                checked <=> root.ntc-enabled;
+                            }
+
+                            CheckBox {
+                                text: "Auto-Bundle PBR Materials";
+                                checked <=> root.ntc-auto-bundle;
+                                enabled: root.ntc-enabled;
+                            }
+                        }
+
+                        GridLayout {
+                            spacing: 8px;
+
+                            Row {
+                                Text {
+                                    text: "Input Encoding:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Bilinear Grid (Fast & Detailed)",
+                                        "Positional Frequencies (Fourier)",
+                                        "Identity / Raw Coordinates"
+                                    ];
+                                    current-index <=> root.ntc-encoding-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Grid / Latent Density:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Grid 64x64 (Fast / ~5.0 bpp)",
+                                        "Grid 128x128 (Balanced / ~8.0 bpp)",
+                                        "Grid 256x256 (High Quality / ~12.0 bpp)",
+                                        "Grid 512x512 (Ultra 4K Crisp / ~16.0 bpp)",
+                                        "Grid 1024x1024 (Extreme 4K Native / ~20.0 bpp)"
+                                    ];
+                                    current-index <=> root.ntc-grid-res-index;
+                                    enabled: root.ntc-enabled && root.ntc-encoding-index == 0;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "GPU Optimizer:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Lion (Sign Momentum — Recommended)",
+                                        "Adam (Adaptive Moments)",
+                                        "SGD (Stochastic Gradient)"
+                                    ];
+                                    current-index <=> root.ntc-optimizer-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Training Quality:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Fast (10 Epochs / Rapid Preview)",
+                                        "Balanced (30 Epochs — Standard)",
+                                        "High Quality (100 Epochs)"
+                                    ];
+                                    current-index <=> root.ntc-quality-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Inference Target:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 130px;
+                                }
+
+                                ComboBox {
+                                    model: [
+                                        "Universal DP4a (AMD RDNA 2/3, RX6000+, Intel, GeForce)",
+                                        "DirectX 12 LinAlg Matrix (SM 6.10)",
+                                        "CPU Fallback (SIMD / Multi-Threaded)"
+                                    ];
+                                    current-index <=> root.ntc-inference-mode-index;
+                                    enabled: root.ntc-enabled;
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 12px;
+                            CheckBox {
+                                text: "Wave-Reduced Bias Accumulation (WaveActiveSum)";
+                                checked <=> root.ntc-wave-reduced-accum;
+                                enabled: root.ntc-enabled;
+                            }
+
+                            CheckBox {
+                                text: "Precompute BC7 Mode Bitmaps (<0.05ms Transcode)";
+                                checked <=> root.ntc-precompute-bc7-modes;
+                                enabled: root.ntc-enabled;
+                            }
+                        }
+
+                        Rectangle {
+                            background: Theme.surface-nested;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: #27272F;
+
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+
+                                Text {
+                                    text: "Customizable PBR Suffix Rules (CryEngine / Unreal / Unity):";
+                                    color: Theme.accent-cyan;
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                }
+
+                                GridLayout {
+                                    spacing: 6px;
+
+                                    Row {
+                                        Text {
+                                            text: "Albedo:";
+                                            color: Theme.text-muted;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-albedo;
+                                            font-size: 11px;
+                                        }
+
+                                        Text {
+                                            text: "Normal:";
+                                            color: Theme.text-muted;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-normal;
+                                            font-size: 11px;
+                                        }
+                                    }
+
+                                    Row {
+                                        Text {
+                                            text: "Metal/Spec:";
+                                            color: Theme.text-muted;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-metal;
+                                            font-size: 11px;
+                                        }
+
+                                        Text {
+                                            text: "Rough/Gloss:";
+                                            color: Theme.text-muted;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-rough;
+                                            font-size: 11px;
+                                        }
+                                    }
+
+                                    Row {
+                                        Text {
+                                            text: "AO:";
+                                            color: Theme.text-muted;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-ao;
+                                            font-size: 11px;
+                                        }
+
+                                        Text {
+                                            text: "Displacement:";
+                                            color: Theme.text-muted;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.pbr-suffix-displ;
+                                            font-size: 11px;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row {
+                Card {
+                    title: "[STREAMING] DDS Texture Streaming & 64KB Sparse Tiles";
+                    header-color: Theme.accent-cyan;
+
+                    VerticalLayout {
+                        spacing: 10px;
+
+                        CheckBox {
+                            text: "Enable 64KB Sparse Tile Packaging (Virtual Texturing)";
+                            checked <=> root.tiled-streaming-enabled;
+                        }
+
+                        CheckBox {
+                            text: "Split Mipmaps into Streamable .highmips";
+                            checked <=> root.mip-split-enabled;
+                            enabled: !root.tiled-streaming-enabled;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Text {
+                                text: "Tiling Threshold:";
+                                color: #D1D5DB;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                width: 130px;
+                            }
+
+                            ComboBox {
+                                model: [
+                                    "Auto (2048+)",
+                                    "Aggressive (1024+)",
+                                    "High-Res (4096+)",
+                                    "Off / No Threshold (Tile All)"
+                                ];
+                                current-index <=> root.min-tiled-res-index;
+                                enabled: root.tiled-streaming-enabled;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Text {
+                                text: "Max Tail Resolution:";
+                                color: #D1D5DB;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                width: 130px;
+                            }
+
+                            ComboBox {
+                                model: ["64x64", "128x128", "256x256", "512x512"];
+                                current-index <=> root.max-tail-res-index;
+                                enabled: root.mip-split-enabled || root.tiled-streaming-enabled;
+                            }
+                        }
+
+                        Text {
+                            text: "64KB Sparse Tiles map 1:1 to D3D12/Vulkan virtual textures for demand-driven Sampler Feedback streaming directly to GPU.";
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                Card {
+                    title: "[GACL] Texture Conditioning Matrix";
+                    header-color: Theme.accent-amber;
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        CheckBox {
+                            text: "Enable GACL Shuffling";
+                            checked <=> root.gacl-enabled;
+                        }
+
+                        CheckBox {
+                            text: "Auto-Optimizer";
+                            checked <=> root.gacl-auto-mode;
+                            enabled: root.gacl-enabled;
+                        }
+                    }
+
+                    GridLayout {
+                        spacing: 8px;
+                        Row {
+                            Text {
+                                text: "BC1:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 32px;
+                            }
+
+                            ComboBox {
+                                model: [
+                                    "Auto",
+                                    "Disabled (Raw)",
+                                    "BC1 Linear (v1)",
+                                    "BC1 Linear + Z-Curve",
+                                    "BC1 5:6:5 Split (v2)",
+                                    "BC1 5:6:5 + Z-Curve"
+                                ];
+                                current-index <=> root.gacl-bc1-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+
+                            Text {
+                                text: "BC5:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 36px;
+                            }
+
+                            ComboBox {
+                                model: ["Auto", "Disabled (Raw)", "BC5 Dual Channel", "BC5 Dual Channel + Z-Curve"];
+                                current-index <=> root.gacl-bc5-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+                        }
+
+                        Row {
+                            Text {
+                                text: "BC2:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 32px;
+                            }
+
+                            ComboBox {
+                                model: ["Auto", "Disabled (Raw)", "BC2 Alpha Nibble Split"];
+                                current-index <=> root.gacl-bc2-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+
+                            Text {
+                                text: "BC6H:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 36px;
+                            }
+
+                            ComboBox {
+                                model: ["Auto", "Disabled (Raw)", "BC6H Header/Index Join"];
+                                current-index <=> root.gacl-bc6h-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+                        }
+
+                        Row {
+                            Text {
+                                text: "BC3:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 32px;
+                            }
+
+                            ComboBox {
+                                model: [
+                                    "Auto",
+                                    "Disabled (Raw)",
+                                    "BC3 Linear (v1)",
+                                    "BC3 Linear + Z-Curve",
+                                    "BC3 6:6:4 Split (v2)",
+                                    "BC3 6:6:4 + Z-Curve"
+                                ];
+                                current-index <=> root.gacl-bc3-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+
+                            Text {
+                                text: "BC7:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 36px;
+                            }
+
+                            ComboBox {
+                                model: [
+                                    "Auto",
+                                    "Disabled (Raw)",
+                                    "BC7 Mode-Split (3-Stream)",
+                                    "BC7 Mode-Join (24-bit)"
+                                ];
+                                current-index <=> root.gacl-bc7-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+                        }
+
+                        Row {
+                            Text {
+                                text: "BC4:";
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                width: 32px;
+                            }
+
+                            ComboBox {
+                                model: ["Auto", "Disabled (Raw)", "BC4 Linear", "BC4 Linear + Z-Curve"];
+                                current-index <=> root.gacl-bc4-index;
+                                enabled: root.gacl-enabled && !root.gacl-auto-mode;
+                            }
+
+                            HorizontalLayout {
+                                col: 2;
+                                colspan: 2;
+                                spacing: 6px;
+
+                                CheckBox {
+                                    text: "RDO:";
+                                    checked <=> root.rdo-enabled;
+                                    enabled: root.gacl-enabled;
+                                }
+
+                                Slider {
+                                    horizontal-stretch: 1;
+                                    minimum: 1;
+                                    maximum: 100;
+                                    value <=> root.rdo-reduction-pct;
+                                    enabled: root.gacl-enabled && root.rdo-enabled;
+                                }
+
+                                Text {
+                                    text: "\{round(root.rdo-reduction-pct)}%";
+                                    color: Theme.text-bright;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                    width: 28px;
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 12px;
+
+                        CheckBox {
+                            text: "Perceptual YCoCg (Albedo)";
+                            checked <=> root.rdo-use-ycocg;
+                            enabled: root.gacl-enabled && root.rdo-enabled;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: "Formats:";
+                                vertical-alignment: center;
+                                color: Theme.text-muted;
+                                font-size: 11px;
+                            }
+
+                            CheckBox {
+                                text: "BC1";
+                                checked <=> root.rdo-bc1;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+
+                            CheckBox {
+                                text: "BC2";
+                                checked <=> root.rdo-bc2;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+
+                            CheckBox {
+                                text: "BC3";
+                                checked <=> root.rdo-bc3;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+
+                            CheckBox {
+                                text: "BC4";
+                                checked <=> root.rdo-bc4;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+
+                            CheckBox {
+                                text: "BC5";
+                                checked <=> root.rdo-bc5;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+
+                            CheckBox {
+                                text: "BC6H";
+                                checked <=> root.rdo-bc6h;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+
+                            CheckBox {
+                                text: "BC7";
+                                checked <=> root.rdo-bc7;
+                                enabled: root.gacl-enabled && root.rdo-enabled;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Row {
+                Card {
+                    title: "[GPU] DirectStorage 1.4 & Hardware Offload";
+                    header-color: Theme.accent-purple;
+
+                    VerticalLayout {
+                        spacing: 10px;
+                        alignment: start;
+
+                        CheckBox {
+                            text: "Direct-to-VRAM GPU Decompression";
+                            checked <=> root.prefer-gpu-decompression;
+                        }
+
+                        GridLayout {
+                            spacing: 8px;
+                            Row {
+                                Text {
+                                    text: "Staging Buffer Size:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 140px;
+                                }
+
+                                ComboBox {
+                                    model: ["64 MB", "128 MB", "256 MB", "512 MB"];
+                                    current-index <=> root.staging-buffer-size-index;
+                                }
+                            }
+
+                            Row {
+                                Text {
+                                    text: "Default Queue Priority:";
+                                    color: #D1D5DB;
+                                    font-size: 12px;
+                                    vertical-alignment: center;
+                                    width: 140px;
+                                }
+
+                                ComboBox {
+                                    model: ["Normal", "High", "Low"];
+                                    current-index <=> root.default-queue-priority-index;
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "DirectStorage bypasses OS page caches and pipes compressed blocks straight into GPU decompression queues.";
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+
+                Card {
+                    title: "[SECURITY] Metadata Encryption (AES-256-GCM)";
+                    header-color: Theme.primary-hover;
+
+                    VerticalLayout {
+                        spacing: 8px;
+                        alignment: start;
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Text {
+                                text: "Master Passphrase:";
+                                color: #D1D5DB;
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                width: 130px;
+                            }
+
+                            LineEdit {
+                                placeholder-text: "Leave empty for unencrypted archive";
+                                text <=> root.encryption-key;
+                            }
+                        }
+
+                        Text {
+                            text: "Uses PBKDF2-HMAC-SHA256 (100,000 iterations). Encrypts chunk tables and metadata without compromising raw I/O throughput.";
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+            Row {
+                Card {
+                    title: "[BENCHMARK] Hardware & Pipeline Diagnostics";
+                    header-color: Theme.accent-cyan;
+                    colspan: 2;
+
+                    VerticalLayout {
+                        spacing: 8px;
+                        alignment: start;
+
+                        Text {
+                            text: "Benchmark memory bandwidth, DirectStorage GPU decompression speed, GACL shuffle transformations, and VFS parallel read rates.";
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Button {
+                                text: "Run Full Hardware Benchmark";
+                                clicked => { root.run-bench-clicked(); }
+                            }
+
+                            Button {
+                                text: "Run Custom File Benchmark...";
+                                clicked => { root.run-custom-bench-clicked(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

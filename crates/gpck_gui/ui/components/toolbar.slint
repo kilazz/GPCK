@@ -1,0 +1,118 @@
+// crates/gpck_gui/ui/components/toolbar.slint
+import { Theme } from "../theme.slint";
+import { ToolButton, NavTab, ToolbarSeparator } from "widgets.slint";
+
+export component TopToolbar inherits Rectangle {
+    in-out property <int> active-tab: 0;
+
+    callback open-archive-clicked();
+    callback add-folder-clicked();
+    callback add-files-clicked();
+    callback clear-list-clicked();
+    callback compress-clicked();
+    callback extract-clicked();
+    callback verify-clicked();
+    callback tab-changed(int);
+
+    background: Theme.surface-dark;
+    height: 56px;
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border-subtle;
+    }
+
+    HorizontalLayout {
+        padding-top: 11px;
+        padding-bottom: 11px;
+        padding-left: 16px;
+        padding-right: 16px;
+        alignment: space-between;
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: start;
+
+            ToolButton {
+                text: "Open Archive";
+                btn-width: 110px;
+                clicked => { root.open-archive-clicked(); }
+            }
+
+            ToolButton {
+                text: "Add Folder";
+                btn-width: 95px;
+                clicked => { root.add-folder-clicked(); }
+            }
+
+            ToolButton {
+                text: "Add Files";
+                btn-width: 90px;
+                clicked => { root.add-files-clicked(); }
+            }
+
+            ToolbarSeparator { }
+
+            ToolButton {
+                text: "Clear";
+                btn-width: 70px;
+                clicked => { root.clear-list-clicked(); }
+            }
+
+            ToolButton {
+                text: "Pack Archive";
+                btn-width: 115px;
+                is-primary: true;
+                clicked => { root.compress-clicked(); }
+            }
+
+            ToolbarSeparator { }
+
+            ToolButton {
+                text: "Extract All";
+                btn-width: 95px;
+                clicked => { root.extract-clicked(); }
+            }
+
+            ToolButton {
+                text: "Verify";
+                btn-width: 75px;
+                clicked => { root.verify-clicked(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: end;
+
+            NavTab {
+                text: "Explorer";
+                tab-width: 86px;
+                is-active: root.active-tab == 0;
+                clicked => { root.tab-changed(0); }
+            }
+
+            NavTab {
+                text: "Map";
+                tab-width: 72px;
+                is-active: root.active-tab == 1;
+                clicked => { root.tab-changed(1); }
+            }
+
+            NavTab {
+                text: "Settings";
+                tab-width: 86px;
+                is-active: root.active-tab == 2;
+                clicked => { root.tab-changed(2); }
+            }
+
+            NavTab {
+                text: "Log";
+                tab-width: 68px;
+                is-active: root.active-tab == 3;
+                clicked => { root.tab-changed(3); }
+            }
+        }
+    }
+}

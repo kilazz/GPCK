@@ -1,0 +1,28 @@
+// crates/gpck_gui/ui/types.slint
+export struct FileItemUI {
+    rel_path: string,
+    res_str: string,
+    format_str: string,
+    method_str: string,
+    gacl_str: string,
+    partition_str: string,
+    queue_str: string,
+    size_str: string,
+    comp_size_str: string,
+    ratio_str: string,
+    is_archive: bool,
+}
+
+export struct BlockItemUI {
+    width: float,
+    color_algo: color,
+    color_part: color,
+    tooltip: string,
+    file_name: string,
+    offset_str: string,
+    size_str: string,
+    comp_size_str: string,
+    partition_str: string,
+    codec_str: string,
+    is_boot_tail: bool,
+}

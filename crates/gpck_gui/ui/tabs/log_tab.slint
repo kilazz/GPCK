@@ -1,0 +1,20 @@
+// crates/gpck_gui/ui/tabs/log_tab.slint
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+
+export component LogTab inherits ScrollView {
+    in property <string> log-text: "";
+
+    VerticalLayout {
+        padding: 14px;
+        TextInput {
+            text: root.log-text;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            color: #A7F3D0;
+            font-family: "monospace";
+            font-size: 12px;
+        }
+    }
+}

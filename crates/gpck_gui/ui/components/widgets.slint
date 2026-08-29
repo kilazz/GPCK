@@ -1,0 +1,207 @@
+// crates/gpck_gui/ui/components/widgets.slint
+import { Theme } from "../theme.slint";
+
+export component ToolbarSeparator inherits Rectangle {
+    width: 1px;
+    height: 24px;
+    background: Theme.divider;
+    horizontal-stretch: 0;
+}
+
+export component ToolButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> is-primary: false;
+    in property <length> btn-width: 100px;
+    callback clicked();
+
+    width: root.btn-width;
+    height: 34px;
+    horizontal-stretch: 0;
+    border-radius: 5px;
+    background: touch.pressed ? (root.is-primary ? Theme.primary-pressed : #1A1A22)
+        : touch.has-hover ? (root.is-primary ? Theme.primary-hover : #32323D)
+        : (root.is-primary ? Theme.primary : #23232B);
+    border-width: 1px;
+    border-color: root.is-primary ? #F87171 : (touch.has-hover ? #4E4E60 : #353542);
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        color: root.is-primary ? Theme.text-bright : (touch.has-hover ? Theme.text-bright : Theme.text-main);
+        font-size: 12px;
+        font-weight: root.is-primary ? 700 : 500;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+export component NavTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> is-active: false;
+    in property <length> tab-width: 80px;
+    callback clicked();
+
+    width: root.tab-width;
+    height: 34px;
+    horizontal-stretch: 0;
+    border-radius: 5px;
+    background: root.is-active ? #E65A4B
+        : touch.has-hover ? #2C2C36
+        : #1E1E24;
+    border-width: 1px;
+    border-color: root.is-active ? #F87171 : (touch.has-hover ? #454556 : #2C2C36);
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        color: root.is-active ? Theme.text-bright : (touch.has-hover ? Theme.text-bright : Theme.text-muted);
+        font-size: 12px;
+        font-weight: root.is-active ? 700 : 500;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+export component ChannelButton inherits Rectangle {
+    in property <string> text;
+    in property <color> active-bg;
+    in property <color> active-border;
+    in property <color> active-text;
+    in-out property <bool> is-active: true;
+    callback toggled();
+
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border-width: 1px;
+
+    background: root.is-active ?
+        (touch.pressed ? root.active-bg.darker(20%) : (touch.has-hover ? root.active-bg.brighter(25%) : root.active-bg)) :
+        (touch.has-hover ? #27272A : #18181B);
+
+    border-color: root.is-active ?
+        (touch.has-hover ? root.active-border.brighter(30%) : root.active-border) :
+        (touch.has-hover ? #3F3F46 : #27272A);
+
+    touch := TouchArea {
+        clicked => {
+            root.is-active = !root.is-active;
+            root.toggled();
+        }
+    }
+
+    Text {
+        text: root.text;
+        color: root.is-active ? root.active-text : (touch.has-hover ? #A1A1AA : #52525B);
+        font-size: 11px;
+        font-weight: 700;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+export component MiniButton inherits Rectangle {
+    in property <string> text;
+    in property <length> btn-width: 24px;
+    callback clicked();
+
+    width: root.btn-width;
+    height: 24px;
+    border-radius: 4px;
+    border-width: 1px;
+    background: touch.pressed ? #27272A : (touch.has-hover ? #3F3F46 : #1E1E24);
+    border-color: touch.has-hover ? #52525B : #2D2D38;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.text;
+        color: touch.has-hover ? Theme.text-bright : #D1D5DB;
+        font-size: 11px;
+        font-weight: 700;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+export component ModernProgressBar inherits Rectangle {
+    in property <float> progress: 0.0;
+    in property <color> fill-color: Theme.accent-cyan;
+
+    width: 130px;
+    height: 6px;
+    border-radius: 3px;
+    background: #22222A;
+    border-width: 1px;
+    border-color: #2F2F3D;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width * max(0.0, min(1.0, root.progress));
+        height: parent.height;
+        border-radius: 2px;
+        background: root.fill-color;
+    }
+}
+
+export component Card inherits Rectangle {
+    in property <string> title;
+    in property <color> header-color: Theme.accent-blue;
+
+    background: Theme.surface-card;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: Theme.border-card;
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+        alignment: start;
+
+        Text {
+            text: root.title;
+            font-size: 12px;
+            font-weight: 700;
+            color: root.header-color;
+        }
+
+        @children
+    }
+}
+
+export component LegendBadge inherits HorizontalLayout {
+    in property <color> badge-color;
+    in property <string> label;
+
+    spacing: 5px;
+    alignment: center;
+
+    Rectangle {
+        width: 10px;
+        height: 14px;
+
+        Rectangle {
+            y: 2px;
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            background: root.badge-color;
+        }
+    }
+
+    Text {
+        text: root.label;
+        color: Theme.text-main;
+        font-size: 11px;
+        vertical-alignment: center;
+    }
+}

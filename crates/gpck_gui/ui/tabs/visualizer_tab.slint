@@ -1,0 +1,274 @@
+// crates/gpck_gui/ui/tabs/visualizer_tab.slint
+import { ScrollView, CheckBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { BlockItemUI } from "../types.slint";
+import { LegendBadge } from "../components/widgets.slint";
+
+export component VisualizerTab inherits Rectangle {
+    in-out property <[BlockItemUI]> visualizer-blocks: [];
+    in-out property <int> selected-block-index: -1;
+    in-out property <bool> map-color-by-partition: false;
+
+    callback block-clicked(int);
+
+    background: Theme.surface-dark;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+
+    map-focus-scope := FocusScope {
+        property <int> cols: Math.max(1, Math.floor((self.width - 48px) / 36px));
+
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow) {
+                if (root.selected-block-index > 0) {
+                    root.selected-block-index -= 1;
+                    root.block-clicked(root.selected-block-index);
+                }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (root.selected-block-index < root.visualizer-blocks.length - 1) {
+                    root.selected-block-index += 1;
+                    root.block-clicked(root.selected-block-index);
+                }
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                if (root.selected-block-index >= self.cols) {
+                    root.selected-block-index -= self.cols;
+                    root.block-clicked(root.selected-block-index);
+                }
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                if (root.selected-block-index + self.cols < root.visualizer-blocks.length) {
+                    root.selected-block-index += self.cols;
+                    root.block-clicked(root.selected-block-index);
+                } else if (root.selected-block-index < root.visualizer-blocks.length - 1) {
+                    root.selected-block-index = root.visualizer-blocks.length - 1;
+                    root.block-clicked(root.selected-block-index);
+                }
+                return accept;
+            }
+            if (event.text == Key.Home) {
+                root.selected-block-index = 0;
+                if (root.visualizer-blocks.length > 0) {
+                    root.block-clicked(0);
+                }
+                return accept;
+            }
+            if (event.text == Key.End) {
+                if (root.visualizer-blocks.length > 0) {
+                    root.selected-block-index = root.visualizer-blocks.length - 1;
+                    root.block-clicked(root.selected-block-index);
+                }
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: 14px;
+            spacing: 12px;
+
+            HorizontalLayout {
+                alignment: space-between;
+
+                HorizontalLayout {
+                    spacing: 14px;
+                    alignment: center;
+
+                    Text {
+                        text: "VFS Physical Disk Layout (\{root.visualizer-blocks.length} chunks on NVMe)";
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: Theme.accent-blue;
+                        vertical-alignment: center;
+                    }
+
+                    // Optically aligned badges
+                    LegendBadge {
+                        badge-color: #81C784;
+                        label: "GDeflate";
+                    }
+
+                    LegendBadge {
+                        badge-color: #90CAF9;
+                        label: "Zstd";
+                    }
+
+                    LegendBadge {
+                        badge-color: #FFB74D;
+                        label: "LZ4";
+                    }
+
+                    LegendBadge {
+                        badge-color: #AB47BC;
+                        label: "rANS";
+                    }
+
+                    LegendBadge {
+                        badge-color: #E879F9;
+                        label: "Brotli-G";
+                    }
+
+                    LegendBadge {
+                        badge-color: #CFD8DC;
+                        label: "Store";
+                    }
+
+                    Text {
+                        text: "★ = Boot Tail (Partition 0)";
+                        font-size: 11px;
+                        color: #FBBF24;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+
+                CheckBox {
+                    text: "Color by NVMe Partition ID";
+                    checked <=> root.map-color-by-partition;
+                }
+            }
+
+            Rectangle {
+                background: Theme.surface-nested;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: #24242C;
+                vertical-stretch: 1;
+
+                ScrollView {
+                    map-matrix-container := Rectangle {
+                        property <int> cols: Math.max(1, Math.floor((self.width - 24px) / 36px));
+
+                        height: (24px + Math.ceil(root.visualizer-blocks.length / self.cols) * 36px);
+
+                        for block[b-idx] in root.visualizer-blocks: Rectangle {
+                            x: 12px + Math.mod(b-idx, map-matrix-container.cols) * 36px;
+                            y: 12px + Math.floor(b-idx / map-matrix-container.cols) * 36px;
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 4px;
+                            background: root.map-color-by-partition ? block.color-part : block.color-algo;
+                            border-width: root.selected-block-index == b-idx ? 2px : (block-touch.has-hover ? 1px : 0px);
+                            border-color: root.selected-block-index == b-idx ? #00E5FF : #FFFFFF;
+
+                            if block.is-boot_tail: Rectangle {
+                                x: 3px;
+                                y: 3px;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                background: #FBBF24;
+                            }
+
+                            block-touch := TouchArea {
+                                clicked => {
+                                    map-focus-scope.focus();
+                                    root.selected-block-index = b-idx;
+                                    root.block-clicked(b-idx);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Selected chunk telemetry inspector card
+            Rectangle {
+                background: Theme.surface-card;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.border-card;
+                height: 90px;
+
+                if root.selected-block-index >= 0: HorizontalLayout {
+                    padding: 12px;
+                    spacing: 24px;
+                    alignment: space-between;
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Text {
+                            text: "Asset: " + root.visualizer-blocks[root.selected-block-index].file_name;
+                            font-size: 12px;
+                            font-weight: 700;
+                            color: Theme.accent-cyan;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            text: "Physical Offset in .gdat: " + root.visualizer-blocks[root.selected-block-index].offset_str;
+                            font-size: 11px;
+                            font-family: "monospace";
+                            color: #A7F3D0;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Text {
+                            text: "Uncompressed Size: " + root.visualizer-blocks[root.selected-block-index].size_str;
+                            font-size: 11px;
+                            color: #D1D5DB;
+                        }
+
+                        Text {
+                            text: "Compressed Size: " + root.visualizer-blocks[root.selected-block-index].comp_size_str;
+                            font-size: 11px;
+                            color: #4ADE80;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Text {
+                            text: "Storage Layer: " + root.visualizer-blocks[root.selected-block-index].partition_str;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: Theme.accent-pink;
+                        }
+
+                        Text {
+                            text: root.visualizer-blocks[root.selected-block-index].is_boot_tail ? "★ Boot Partition Tier (Instant Spawn)" : "GPU Streaming Queue Tier";
+                            font-size: 11px;
+                            color: root.visualizer-blocks[root.selected-block-index].is_boot_tail ? #FBBF24 : Theme.text-muted;
+                        }
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        Text {
+                            text: "Codec: " + root.visualizer-blocks[root.selected-block-index].codec_str;
+                            font-size: 11px;
+                            color: Theme.accent-blue;
+                        }
+
+                        Text {
+                            text: "Block #" + (root.selected-block-index + 1) + " of " + root.visualizer-blocks.length;
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                        }
+                    }
+                }
+
+                if root.selected-block-index < 0: VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "Click on any chunk block above or use arrow keys (← ↑ → ↓) to inspect its physical NVMe offset, partition ID, and streaming tier.";
+                        font-size: 12px;
+                        color: Theme.text-dim;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
